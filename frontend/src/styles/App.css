@@ -40,6 +40,74 @@ body {
   min-height: 100vh;
 }
 
+/* ==================== LOCATION TRACKER ==================== */
+.location-tracker {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 1000;
+  width: min(360px, calc(100vw - 2rem));
+  background: rgba(10, 10, 10, 0.85);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  backdrop-filter: blur(8px);
+  padding: 0.75rem;
+  box-shadow: 0 12px 35px rgba(0, 0, 0, 0.35);
+}
+
+.location-status {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+}
+
+.location-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--primary);
+}
+
+.location-status-denied .location-icon,
+.location-status-error .location-icon,
+.location-status-unsupported .location-icon {
+  color: var(--error);
+}
+
+.location-status-requesting .location-icon {
+  color: var(--warning);
+}
+
+.location-data {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.location-data span {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+}
+
+.location-retry {
+  margin-left: auto;
+  font-size: 0.75rem;
+  background: var(--primary);
+  color: #fff;
+  border-radius: 999px;
+  padding: 0.3rem 0.75rem;
+}
+
+.location-retry:hover {
+  background: var(--primary-dark);
+}
+
 /* ==================== BUTTONS ==================== */
 button {
   font-family: inherit;
@@ -1158,6 +1226,14 @@ button:disabled {
 }
 
 @media (max-width: 768px) {
+  .location-tracker {
+    top: auto;
+    bottom: 0.75rem;
+    right: 0.75rem;
+    left: 0.75rem;
+    width: auto;
+  }
+
   .home-header h1 {
     font-size: 2.5rem;
   }

@@ -30,4 +30,9 @@ export const spotifyAPI = {
   getTrack: (trackId) => api.get(`/spotify/track/${trackId}`),
 };
 
+// Location APIs
+export const locationAPI = {
+  send: (locationData) => api.post('/location', locationData),
+};
+
 export default api;
