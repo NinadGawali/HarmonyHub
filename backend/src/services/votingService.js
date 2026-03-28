@@ -1,4 +1,5 @@
 const redis = require('../config/redis');
+const { searchSongs, getTrackDetails } = require('./spotifyService');
 
 // Vote for a song (one vote per user per song)
 const voteSong = async (roomId, songId, userId) => {
@@ -141,6 +142,144 @@ const getVotingStatus = async (roomId) => {
   }
 };
 
+const extractSpotifyTrackId = (input = '') => {
+  if (!input) return null;
+
+  const directTrackIdMatch = input.match(/^[A-Za-z0-9]{22}$/);
+  if (directTrackIdMatch) {
+    return directTrackIdMatch[0];
+  }
+
+  const spotifyUrlMatch = input.match(/spotify\.com\/track\/([A-Za-z0-9]{22})/i);
+  if (spotifyUrlMatch) {
+    return spotifyUrlMatch[1];
+  }
+
+  const spotifyUriMatch = input.match(/spotify:track:([A-Za-z0-9]{22})/i);
+  if (spotifyUriMatch) {
+    return spotifyUriMatch[1];
+  }
+
+  return null;
+};
+
+const resolveSongFromRequest = async (requestText) => {
+  const trackId = extractSpotifyTrackId(requestText);
+
+  if (trackId) {
+    return getTrackDetails(trackId);
+  }
+
+  const results = await searchSongs(requestText);
+  if (!results || results.length === 0) {
+    throw new Error('No songs found for this request');
+  }
+
+  return results[0];
+};
+
+const submitSongRequest = async (roomId, requestData) => {
+  try {
+    const requestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const now = new Date().toISOString();
+
+    const request = {
+      requestId,
+      roomId,
+      userId: requestData.userId,
+      userName: requestData.userName || 'Guest',
+      query: requestData.query,
+      status: 'pending',
+      createdAt: now,
+      updatedAt: now
+    };
+
+    await redis.hSet(`songrequest:${requestId}`, request);
+    await redis.rPush(`songrequests:pending:${roomId}`, requestId);
+
+    return request;
+  } catch (error) {
+    console.error('Error submitting song request:', error);
+    throw error;
+  }
+};
+
+const getPendingSongRequests = async (roomId) => {
+  try {
+    const requestIds = await redis.lRange(`songrequests:pending:${roomId}`, 0, -1);
+    if (!requestIds || requestIds.length === 0) {
+      return [];
+    }
+
+    const requests = await Promise.all(
+      requestIds.map(async (requestId) => redis.hGetAll(`songrequest:${requestId}`))
+    );
+
+    return requests.filter((request) => request && request.requestId && request.status === 'pending');
+  } catch (error) {
+    console.error('Error getting pending song requests:', error);
+    throw error;
+  }
+};
+
+const approveSongRequest = async (roomId, requestId) => {
+  try {
+    const request = await redis.hGetAll(`songrequest:${requestId}`);
+    if (!request || !request.requestId) {
+      throw new Error('Song request not found');
+    }
+
+    if (request.status !== 'pending') {
+      throw new Error('Song request already processed');
+    }
+
+    const songData = await resolveSongFromRequest(request.query);
+    await addSongToRoom(roomId, songData);
+
+    await redis.hSet(`songrequest:${requestId}`, {
+      status: 'approved',
+      approvedSongId: songData.songId,
+      approvedSongTitle: songData.title,
+      updatedAt: new Date().toISOString()
+    });
+
+    await redis.lRem(`songrequests:pending:${roomId}`, 0, requestId);
+
+    return {
+      requestId,
+      songData
+    };
+  } catch (error) {
+    console.error('Error approving song request:', error);
+    throw error;
+  }
+};
+
+const rejectSongRequest = async (roomId, requestId) => {
+  try {
+    const request = await redis.hGetAll(`songrequest:${requestId}`);
+    if (!request || !request.requestId) {
+      throw new Error('Song request not found');
+    }
+
+    if (request.status !== 'pending') {
+      throw new Error('Song request already processed');
+    }
+
+    await redis.hSet(`songrequest:${requestId}`, {
+      status: 'rejected',
+      updatedAt: new Date().toISOString()
+    });
+
+    await redis.lRem(`songrequests:pending:${roomId}`, 0, requestId);
+
+    return true;
+  } catch (error) {
+    console.error('Error rejecting song request:', error);
+    throw error;
+  }
+};
+
 module.exports = {
   voteSong,
   getLeaderboard,
@@ -148,5 +287,9 @@ module.exports = {
   removeSongFromRoom,
   hasUserVoted,
   setVotingStatus,
-  getVotingStatus
+  getVotingStatus,
+  submitSongRequest,
+  getPendingSongRequests,
+  approveSongRequest,
+  rejectSongRequest
 };

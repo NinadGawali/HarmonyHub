@@ -14,6 +14,10 @@ module.exports = (io) => {
         const leaderboard = await votingService.getLeaderboard(roomId);
         socket.emit('leaderboard_update', leaderboard);
 
+        // Send pending song requests to the joined user
+        const pendingRequests = await votingService.getPendingSongRequests(roomId);
+        socket.emit('song_requests_updated', pendingRequests);
+
         // Notify others in the room
         socket.to(roomId).emit('user_joined', {
           userId: socket.id,
@@ -128,6 +132,104 @@ module.exports = (io) => {
       } catch (error) {
         console.error('Error toggling voting:', error);
         socket.emit('error', { message: 'Failed to toggle voting' });
+      }
+    });
+
+    // Submit song request (participant)
+    socket.on('submit_song_request', async (data) => {
+      try {
+        const { roomId, userId, userName, query } = data || {};
+
+        if (!roomId || !userId || !query || !query.trim()) {
+          socket.emit('error', { message: 'Invalid request data' });
+          return;
+        }
+
+        const request = await votingService.submitSongRequest(roomId, {
+          userId,
+          userName,
+          query: query.trim()
+        });
+
+        const pendingRequests = await votingService.getPendingSongRequests(roomId);
+        io.to(roomId).emit('song_requests_updated', pendingRequests);
+
+        socket.emit('song_request_submitted', {
+          requestId: request.requestId,
+          message: 'Request sent to admin'
+        });
+      } catch (error) {
+        console.error('Error submitting song request:', error);
+        socket.emit('error', { message: error.message || 'Failed to submit song request' });
+      }
+    });
+
+    // Get pending song requests
+    socket.on('get_song_requests', async (data) => {
+      try {
+        const { roomId } = data || {};
+
+        if (!roomId) {
+          socket.emit('error', { message: 'Invalid room data' });
+          return;
+        }
+
+        const pendingRequests = await votingService.getPendingSongRequests(roomId);
+        socket.emit('song_requests_updated', pendingRequests);
+      } catch (error) {
+        console.error('Error fetching song requests:', error);
+        socket.emit('error', { message: error.message || 'Failed to fetch song requests' });
+      }
+    });
+
+    // Approve song request (admin)
+    socket.on('approve_song_request', async (data) => {
+      try {
+        const { roomId, requestId } = data || {};
+
+        if (!roomId || !requestId) {
+          socket.emit('error', { message: 'Invalid request approval data' });
+          return;
+        }
+
+        const approved = await votingService.approveSongRequest(roomId, requestId);
+        const leaderboard = await votingService.getLeaderboard(roomId);
+        const pendingRequests = await votingService.getPendingSongRequests(roomId);
+
+        io.to(roomId).emit('leaderboard_update', leaderboard);
+        io.to(roomId).emit('song_requests_updated', pendingRequests);
+        io.to(roomId).emit('song_request_processed', {
+          requestId,
+          status: 'approved',
+          songTitle: approved.songData.title
+        });
+      } catch (error) {
+        console.error('Error approving song request:', error);
+        socket.emit('error', { message: error.message || 'Failed to approve song request' });
+      }
+    });
+
+    // Reject song request (admin)
+    socket.on('reject_song_request', async (data) => {
+      try {
+        const { roomId, requestId } = data || {};
+
+        if (!roomId || !requestId) {
+          socket.emit('error', { message: 'Invalid request rejection data' });
+          return;
+        }
+
+        await votingService.rejectSongRequest(roomId, requestId);
+        const pendingRequests = await votingService.getPendingSongRequests(roomId);
+
+        io.to(roomId).emit('song_requests_updated', pendingRequests);
+        io.to(roomId).emit('song_request_processed', {
+          requestId,
+          status: 'rejected'
+        });
+      } catch (error) {
+        console.error('Error rejecting song request:', error);
+        socket.emit('error', { message: error.message || 'Failed to reject song request' });
       }
     });
 
