@@ -16,6 +16,9 @@ export default function Room() {
   const [connected, setConnected] = useState(socket.connected);
   const [votingOpen, setVotingOpen] = useState(true);
   const [votedSongs, setVotedSongs] = useState(new Set());
+  const [songRequest, setSongRequest] = useState('');
+  const [requestStatus, setRequestStatus] = useState('');
+  const [submittingRequest, setSubmittingRequest] = useState(false);
   const userName = location.state?.userName || 'Guest';
   const [userId] = useState(`${userName}_${Date.now()}`);
 
@@ -40,16 +43,35 @@ export default function Room() {
       setVotedSongs(prev => new Set([...prev, data.songId]));
     };
 
+    const handleRequestSubmitted = (data) => {
+      setSubmittingRequest(false);
+      setRequestStatus(data?.message || 'Request sent to admin');
+      setSongRequest('');
+    };
+
+    const handleRequestProcessed = (data) => {
+      if (data?.status === 'approved') {
+        setRequestStatus(`Your request was approved${data.songTitle ? `: ${data.songTitle}` : ''}`);
+      }
+      if (data?.status === 'rejected') {
+        setRequestStatus('Your request was rejected by admin');
+      }
+    };
+
     socket.on('connect', handleConnect);
     socket.on('disconnect', handleDisconnect);
     socket.on('voting_status_changed', handleVotingStatus);
     socket.on('vote_success', handleVoteSuccess);
+    socket.on('song_request_submitted', handleRequestSubmitted);
+    socket.on('song_request_processed', handleRequestProcessed);
 
     return () => {
       socket.off('connect', handleConnect);
       socket.off('disconnect', handleDisconnect);
       socket.off('voting_status_changed', handleVotingStatus);
       socket.off('vote_success', handleVoteSuccess);
+      socket.off('song_request_submitted', handleRequestSubmitted);
+      socket.off('song_request_processed', handleRequestProcessed);
     };
   }, []);
 
@@ -82,6 +104,24 @@ export default function Room() {
     }
 
     socket.emit('vote_song', { roomId, songId, userId });
+  };
+
+  const handleSongRequestSubmit = (e) => {
+    e.preventDefault();
+
+    if (!songRequest.trim()) {
+      return;
+    }
+
+    setSubmittingRequest(true);
+    setRequestStatus('');
+
+    socket.emit('submit_song_request', {
+      roomId,
+      userId,
+      userName,
+      query: songRequest.trim()
+    });
   };
 
   if (loading) {
@@ -128,6 +168,23 @@ export default function Room() {
       </header>
 
       <main className="room-content">
+        <section className="song-request-panel">
+          <h3>Request a Song from Admin</h3>
+          <form onSubmit={handleSongRequestSubmit} className="song-request-form">
+            <input
+              type="text"
+              placeholder="Enter song name or Spotify link"
+              value={songRequest}
+              onChange={(e) => setSongRequest(e.target.value)}
+              disabled={submittingRequest}
+            />
+            <button type="submit" className="btn-primary" disabled={submittingRequest || !songRequest.trim()}>
+              {submittingRequest ? 'Sending...' : 'Send Request'}
+            </button>
+          </form>
+          {requestStatus && <p className="request-status-message">{requestStatus}</p>}
+        </section>
+
         {!votingOpen && (
           <div className="voting-closed-banner">
             🔒 Voting is closed - Results are final!

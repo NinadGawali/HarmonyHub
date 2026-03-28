@@ -20,6 +20,7 @@ export default function Admin() {
   const [error, setError] = useState('');
   const [connected, setConnected] = useState(socket.connected);
   const [votingOpen, setVotingOpen] = useState(true);
+  const [songRequests, setSongRequests] = useState([]);
   const adminName = location.state?.adminName || 'Admin';
 
   // Handle leaderboard updates
@@ -50,12 +51,28 @@ export default function Admin() {
       setVotingOpen(isOpen);
     };
 
+    const handleSongRequestsUpdated = (requests) => {
+      setSongRequests(Array.isArray(requests) ? requests : []);
+    };
+
+    const handleSongRequestProcessed = (data) => {
+      if (data?.status === 'approved') {
+        setError('');
+      }
+    };
+
     socket.on('voting_status_changed', handleVotingStatusChange);
+    socket.on('song_requests_updated', handleSongRequestsUpdated);
+    socket.on('song_request_processed', handleSongRequestProcessed);
+
+    socket.emit('get_song_requests', { roomId });
 
     return () => {
       socket.off('voting_status_changed', handleVotingStatusChange);
+      socket.off('song_requests_updated', handleSongRequestsUpdated);
+      socket.off('song_request_processed', handleSongRequestProcessed);
     };
-  }, []);
+  }, [roomId]);
 
   // Load initial leaderboard
   useEffect(() => {
@@ -118,6 +135,14 @@ export default function Admin() {
     const newStatus = !votingOpen;
     socket.emit('toggle_voting', { roomId, isOpen: newStatus });
     setVotingOpen(newStatus); // Optimistic update
+  };
+
+  const handleApproveRequest = (requestId) => {
+    socket.emit('approve_song_request', { roomId, requestId });
+  };
+
+  const handleRejectRequest = (requestId) => {
+    socket.emit('reject_song_request', { roomId, requestId });
   };
 
   if (loading) {
@@ -214,6 +239,38 @@ export default function Admin() {
                     >
                       <Plus size={16} />
                     </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="request-section">
+            <h3>Song Requests</h3>
+            {songRequests.length === 0 ? (
+              <p className="request-empty">No pending requests</p>
+            ) : (
+              <div className="request-list">
+                {songRequests.map((request) => (
+                  <div key={request.requestId} className="request-item">
+                    <div className="request-text">
+                      <p className="request-query">{request.query}</p>
+                      <p className="request-meta">Requested by {request.userName || 'Guest'}</p>
+                    </div>
+                    <div className="request-actions">
+                      <button
+                        className="request-approve"
+                        onClick={() => handleApproveRequest(request.requestId)}
+                      >
+                        Approve
+                      </button>
+                      <button
+                        className="request-reject"
+                        onClick={() => handleRejectRequest(request.requestId)}
+                      >
+                        Reject
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>

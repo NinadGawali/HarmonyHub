@@ -394,6 +394,45 @@ button:disabled {
   margin: 0 auto;
 }
 
+.song-request-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.song-request-panel h3 {
+  font-size: 1.1rem;
+  margin-bottom: 0.75rem;
+}
+
+.song-request-form {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.song-request-form input {
+  flex: 1;
+  background: var(--surface-highlight);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.75rem 0.9rem;
+  color: var(--text-primary);
+}
+
+.song-request-form input:focus {
+  border-color: var(--primary);
+  outline: none;
+}
+
+.request-status-message {
+  margin-top: 0.75rem;
+  color: var(--success);
+  font-size: 0.9rem;
+}
+
 /* ==================== ADMIN PAGE ==================== */
 .admin-page {
   min-height: 100vh;
@@ -449,6 +488,84 @@ button:disabled {
   border-radius: 16px;
   padding: 1.5rem;
   border: 1px solid var(--border);
+}
+
+.request-section {
+  background: var(--surface);
+  border-radius: 16px;
+  padding: 1.5rem;
+  border: 1px solid var(--border);
+}
+
+.request-section h3 {
+  margin-bottom: 1rem;
+  font-size: 1.25rem;
+}
+
+.request-empty {
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+
+.request-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.request-item {
+  background: var(--surface-highlight);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.9rem;
+}
+
+.request-text {
+  margin-bottom: 0.6rem;
+}
+
+.request-query {
+  font-weight: 600;
+  font-size: 0.95rem;
+  margin-bottom: 0.2rem;
+}
+
+.request-meta {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.request-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.request-approve,
+.request-reject {
+  border-radius: 8px;
+  padding: 0.45rem 0.8rem;
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.request-approve {
+  background: rgba(29, 185, 84, 0.2);
+  color: var(--success);
+  border: 1px solid rgba(29, 185, 84, 0.5);
+}
+
+.request-approve:hover {
+  background: rgba(29, 185, 84, 0.35);
+}
+
+.request-reject {
+  background: rgba(226, 33, 52, 0.2);
+  color: var(--error);
+  border: 1px solid rgba(226, 33, 52, 0.5);
+}
+
+.request-reject:hover {
+  background: rgba(226, 33, 52, 0.35);
 }
 
 .search-section h3 {
@@ -1274,5 +1391,14 @@ button:disabled {
   .vote-button,
   .remove-button {
     width: 100%;
+  }
+
+  .song-request-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .request-actions {
+    flex-direction: column;
   }
 }
