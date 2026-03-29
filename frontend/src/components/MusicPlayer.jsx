@@ -1,22 +1,55 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Play, Pause, SkipForward, Volume2, VolumeX } from 'lucide-react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { Play, Pause, SkipForward, SkipBack, Volume2, VolumeX, Music } from 'lucide-react';
 
 export default function MusicPlayer({ songs, autoPlay = false }) {
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [playableQueue, setPlayableQueue] = useState([]);
+  const [currentQueueIndex, setCurrentQueueIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [volume, setVolume] = useState(0.7);
   const [isMuted, setIsMuted] = useState(false);
+  const [positionSec, setPositionSec] = useState(0);
+  const [durationSec, setDurationSec] = useState(0);
+
   const audioRef = useRef(null);
+  const advancingRef = useRef(false);
 
-  const currentSong = songs[currentIndex];
+  const currentSong = playableQueue[currentQueueIndex];
 
-  // Debug: Log song preview URL
+  const formatTime = useCallback((seconds) => {
+    const safeSeconds = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
+    const mins = Math.floor(safeSeconds / 60);
+    const secs = safeSeconds % 60;
+    return `${mins}:${String(secs).padStart(2, '0')}`;
+  }, []);
+
+  // Build queue from room songs while preserving currently playing song when possible.
+  useEffect(() => {
+    setPlayableQueue((previousQueue) => {
+      const filtered = (songs || []).filter((song) => song?.previewUrl?.trim());
+
+      if (!filtered.length) {
+        setCurrentQueueIndex(0);
+        setIsPlaying(false);
+        return filtered;
+      }
+
+      const currentSongId = previousQueue[currentQueueIndex]?.songId;
+      const preservedIndex = currentSongId
+        ? filtered.findIndex((song) => song.songId === currentSongId)
+        : -1;
+
+      setCurrentQueueIndex(preservedIndex >= 0 ? preservedIndex : 0);
+      return filtered;
+    });
+  }, [songs]);
+
   useEffect(() => {
     if (currentSong) {
-      console.log('Current song:', currentSong.title);
-      console.log('Preview URL:', currentSong.previewUrl || 'NOT AVAILABLE');
+      console.log(`🎵 Queue Index: ${currentQueueIndex + 1}/${playableQueue.length}`);
+      console.log(`   Title: ${currentSong.title}`);
+      console.log(`   Artist: ${currentSong.artist}`);
     }
-  }, [currentSong]);
+  }, [currentSong, currentQueueIndex, playableQueue.length]);
 
   useEffect(() => {
     if (audioRef.current) {
@@ -24,144 +57,225 @@ export default function MusicPlayer({ songs, autoPlay = false }) {
     }
   }, [volume, isMuted]);
 
-  useEffect(() => {
-    if (autoPlay && songs.length > 0) {
-      playCurrentSong();
+  const advanceToNextSong = useCallback(() => {
+    if (advancingRef.current) {
+      return;
     }
-  }, [currentIndex, autoPlay]);
 
-  // Auto-skip if current song has no preview
-  useEffect(() => {
-    const hasValidPreview = currentSong?.previewUrl && currentSong.previewUrl.trim() !== '';
-    if (!hasValidPreview && songs.length > 1 && currentIndex < songs.length - 1) {
-      // Auto-skip to next song after 1 second
-      const timer = setTimeout(() => {
-        setCurrentIndex(currentIndex + 1);
-      }, 1000);
-      return () => clearTimeout(timer);
+    if (currentQueueIndex < playableQueue.length - 1) {
+      advancingRef.current = true;
+      setCurrentQueueIndex((prev) => prev + 1);
+      setIsPlaying(true);
+      setPositionSec(0);
+      window.setTimeout(() => {
+        advancingRef.current = false;
+      }, 150);
+      return;
     }
-  }, [currentIndex, currentSong, songs.length]);
 
-  const playCurrentSong = () => {
-    const hasValidPreview = currentSong?.previewUrl && currentSong.previewUrl.trim() !== '';
-    if (audioRef.current && hasValidPreview) {
-      audioRef.current.play();
+    setIsPlaying(false);
+  }, [currentQueueIndex, playableQueue.length]);
+
+  // Start playback when queue is available.
+  useEffect(() => {
+    if (!audioRef.current || !autoPlay || !playableQueue.length) {
+      return;
+    }
+
+    const shouldAutoStart = isPlaying || currentQueueIndex === 0;
+    if (shouldAutoStart) {
+      window.setTimeout(() => {
+        audioRef.current?.play().catch((err) => {
+          console.warn('Auto-play start failed:', err.message);
+        });
+      }, 500);
+    }
+  }, [autoPlay, playableQueue.length, currentQueueIndex, isPlaying]);
+
+  const handleAudioEnded = useCallback(() => {
+    console.log('🔚 Song ended');
+    advanceToNextSong();
+  }, [advanceToNextSong]);
+
+  // Fallback: detect manual seek-to-end and force queue advance.
+  const handleTimeUpdate = useCallback(() => {
+    if (!audioRef.current) {
+      return;
+    }
+
+    const currentTime = audioRef.current.currentTime;
+    const duration = Number.isFinite(audioRef.current.duration) ? audioRef.current.duration : 0;
+
+    setPositionSec(currentTime);
+    if (duration > 0) {
+      setDurationSec(duration);
+    }
+
+    if (autoPlay && isPlaying && duration > 0 && currentTime >= duration - 0.2) {
+      advanceToNextSong();
+    }
+  }, [advanceToNextSong, autoPlay, isPlaying]);
+
+  // Play current song
+  const playSong = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.play().catch((err) => {
+        console.error('Play failed:', err.message);
+      });
       setIsPlaying(true);
     }
-  };
+  }, []);
 
-  const handlePlayPause = () => {
-    const hasValidPreview = currentSong?.previewUrl && currentSong.previewUrl.trim() !== '';
-    if (!audioRef.current || !hasValidPreview) return;
-
-    if (isPlaying) {
+  // Pause current song
+  const pauseSong = useCallback(() => {
+    if (audioRef.current) {
       audioRef.current.pause();
       setIsPlaying(false);
+    }
+  }, []);
+
+  // Toggle play/pause
+  const handlePlayPause = useCallback(() => {
+    if (isPlaying) {
+      pauseSong();
     } else {
-      audioRef.current.play();
+      playSong();
+    }
+  }, [isPlaying, playSong, pauseSong]);
+
+  const handleSkipNext = useCallback(() => {
+    advanceToNextSong();
+  }, [advanceToNextSong]);
+
+  const handleSkipPrev = useCallback(() => {
+    if (currentQueueIndex > 0) {
+      setCurrentQueueIndex((prev) => prev - 1);
       setIsPlaying(true);
+      setPositionSec(0);
     }
-  };
+  }, [currentQueueIndex]);
 
-  const handleNext = () => {
-    if (currentIndex < songs.length - 1) {
-      setCurrentIndex(currentIndex + 1);
-      setIsPlaying(false);
+  const toggleMute = useCallback(() => {
+    setIsMuted((prev) => !prev);
+  }, []);
+
+  const handleSeek = useCallback((event) => {
+    if (!audioRef.current) {
+      return;
     }
-  };
 
-  const handleEnded = () => {
-    if (currentIndex < songs.length - 1) {
-      setCurrentIndex(currentIndex + 1);
-    } else {
-      setIsPlaying(false);
-    }
-  };
+    const nextTime = Number(event.target.value);
+    audioRef.current.currentTime = nextTime;
+    setPositionSec(nextTime);
+  }, []);
 
-  const toggleMute = () => {
-    setIsMuted(!isMuted);
-  };
-
-  if (!songs || songs.length === 0) {
+  if (!playableQueue || playableQueue.length === 0) {
     return (
       <div className="music-player">
         <div className="player-empty">
-          🎵 No songs to play
+          <Music size={32} />
+          <p>No playable songs in queue</p>
+          <small>Songs need preview URLs</small>
         </div>
-      </div>
-    );
-  }
-
-  const hasValidPreview = currentSong?.previewUrl && currentSong.previewUrl.trim() !== '';
-
-  if (!hasValidPreview) {
-    return (
-      <div className="music-player">
-        <div className="player-empty">
-          ⚠️ Preview not available for "{currentSong?.title || 'this song'}"
-          {currentIndex < songs.length - 1 && <div>Skipping to next...</div>}
-        </div>
-        {currentIndex < songs.length - 1 && (
-          <button onClick={handleNext} className="player-next-btn">
-            Skip Now
-          </button>
-        )}
       </div>
     );
   }
 
   return (
     <div className="music-player">
+      <div className="player-top-row">
+        <span className="player-now-playing">Now Playing</span>
+        <span className="player-queue-chip">{currentQueueIndex + 1} / {playableQueue.length}</span>
+      </div>
+
       <audio
         ref={audioRef}
-        src={currentSong.previewUrl}
-        onEnded={handleEnded}
+        key={currentSong?.songId}
+        src={currentSong?.previewUrl}
+        onEnded={handleAudioEnded}
+        onTimeUpdate={handleTimeUpdate}
+        onLoadedMetadata={() => {
+          if (audioRef.current) {
+            setDurationSec(Number.isFinite(audioRef.current.duration) ? audioRef.current.duration : 0);
+          }
+        }}
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
+        crossOrigin="anonymous"
       />
 
       <div className="player-info">
-        {currentSong.image && (
+        {currentSong?.image && (
           <img src={currentSong.image} alt={currentSong.title} className="player-image" />
         )}
         <div className="player-text">
-          <h4 className="player-title">{currentSong.title}</h4>
-          <p className="player-artist">{currentSong.artist}</p>
+          <h4 className="player-title">{currentSong?.title}</h4>
+          <p className="player-artist">{currentSong?.artist}</p>
           <p className="player-stats">
-            🏆 Rank #{currentIndex + 1} • {currentSong.votes || 0} votes
+            Rank #{currentQueueIndex + 1} • {currentSong?.votes || 0} votes • Queue {playableQueue.length}
           </p>
         </div>
       </div>
 
+      <div className="player-progress-wrap">
+        <span className="player-time">{formatTime(positionSec)}</span>
+        <input
+          type="range"
+          min="0"
+          max={Math.max(durationSec, 1)}
+          step="0.1"
+          value={Math.min(positionSec, durationSec || 0)}
+          onChange={handleSeek}
+          className="player-progress"
+        />
+        <span className="player-time">{formatTime(durationSec)}</span>
+      </div>
+
       <div className="player-controls">
-        <button onClick={handlePlayPause} className="player-btn play-pause">
+        <button
+          onClick={handleSkipPrev}
+          className="player-btn"
+          title="Previous"
+          disabled={currentQueueIndex === 0}
+        >
+          <SkipBack size={20} />
+        </button>
+
+        <button onClick={handlePlayPause} className="player-btn play-pause" title={isPlaying ? 'Pause' : 'Play'}>
           {isPlaying ? <Pause size={24} /> : <Play size={24} />}
         </button>
-        
-        {currentIndex < songs.length - 1 && (
-          <button onClick={handleNext} className="player-btn">
-            <SkipForward size={20} />
-          </button>
-        )}
+
+        <button
+          onClick={handleSkipNext}
+          className="player-btn"
+          title="Next"
+          disabled={currentQueueIndex >= playableQueue.length - 1}
+        >
+          <SkipForward size={20} />
+        </button>
       </div>
 
       <div className="player-volume">
-        <button onClick={toggleMute} className="volume-btn">
+        <button onClick={toggleMute} className="volume-btn" title={isMuted ? 'Unmute' : 'Mute'}>
           {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
         </button>
         <input
           type="range"
           min="0"
           max="1"
-          step="0.1"
+          step="0.05"
           value={isMuted ? 0 : volume}
           onChange={(e) => setVolume(parseFloat(e.target.value))}
           className="volume-slider"
+          title="Volume"
         />
       </div>
 
       <div className="player-queue">
-        <p>Playing {currentIndex + 1} of {songs.length}</p>
+        <p>
+          Queue: {currentQueueIndex + 1} / {playableQueue.length}
+          {autoPlay && <span> (auto-play)</span>}
+        </p>
       </div>
     </div>
   );

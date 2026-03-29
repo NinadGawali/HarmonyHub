@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Home from './pages/Home';
 import Room from './pages/Room';
 import Admin from './pages/Admin';
+import SpotifyCallback from './pages/SpotifyCallback';
 import LocationTracker from './components/LocationTracker';
 import './styles/App.css';
 
@@ -14,6 +15,7 @@ function App() {
         <Route path="/" element={<Home />} />
         <Route path="/room/:roomId" element={<Room />} />
         <Route path="/admin/:roomId" element={<Admin />} />
+        <Route path="/spotify/callback" element={<SpotifyCallback />} />
       </Routes>
     </Router>
   );

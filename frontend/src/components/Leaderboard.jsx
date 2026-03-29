@@ -2,7 +2,16 @@ import React from 'react';
 import SongCard from './SongCard';
 import { Trophy, Music2 } from 'lucide-react';
 
-export default function Leaderboard({ songs, onVote, showVoteButton = true, isAdmin = false, onRemove, votedSongs }) {
+export default function Leaderboard({
+  songs,
+  onVote,
+  showVoteButton = true,
+  isAdmin = false,
+  onRemove,
+  votedSongs,
+  onSongSelect,
+  activeSongId
+}) {
   if (!songs || songs.length === 0) {
     return (
       <div className="empty-state">
@@ -31,6 +40,8 @@ export default function Leaderboard({ songs, onVote, showVoteButton = true, isAd
             isAdmin={isAdmin}
             onRemove={onRemove}
             votedSongs={votedSongs}
+            onSelectSong={onSongSelect}
+            isActive={activeSongId === song.songId}
           />
         ))}
       </div>

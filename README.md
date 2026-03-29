@@ -211,7 +211,7 @@ sudo systemctl enable redis
 3. Fill in details:
    - App Name: `HarmonyHub`
    - App Description: `Music voting system`
-   - Redirect URI: `http://localhost:3000` (for testing)
+  - Redirect URI: `http://localhost:5173/spotify/callback` (for frontend login callback)
 4. Accept terms and click **Create**
 5. Copy your **Client ID** and **Client Secret**
 
@@ -268,6 +268,7 @@ cp .env.example .env
 ```env
 VITE_API_URL=http://localhost:3000/api
 VITE_SOCKET_URL=http://localhost:3000
+VITE_SPOTIFY_REDIRECT_URI=http://localhost:5173/spotify/callback
 ```
 
 ### 4. Start Redis
@@ -279,6 +280,7 @@ redis-server
 # macOS/Linux
 redis-server
 ```
+http://54.92.200.109:5173/
 
 Verify Redis is running:
 ```bash
@@ -341,6 +343,7 @@ Visit **http://localhost:5173** in your browser 🎉
 |----------|-------------|---------|----------|
 | `VITE_API_URL` | Backend API URL | `http://localhost:3000/api` | No |
 | `VITE_SOCKET_URL` | Socket.io server URL | `http://localhost:3000` | No |
+| `VITE_SPOTIFY_REDIRECT_URI` | Spotify OAuth callback URL (must exactly match Spotify Dashboard) | `http://localhost:5173/spotify/callback` | No |
 
 ---
 

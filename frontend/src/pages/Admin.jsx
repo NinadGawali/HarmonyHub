@@ -286,10 +286,17 @@ export default function Admin() {
 
         {/* Right Panel - Leaderboard */}
         <main className="admin-main">
-          {!votingOpen && songs.length > 0 && (
+          {songs.length > 0 && (
             <div className="music-player-section">
-              <h2 className="player-heading">🎵 Now Playing Winners</h2>
-              <MusicPlayer songs={songs} autoPlay={true} />
+              <h2 className="player-heading">
+                {votingOpen ? '🎵 Queue Preview' : '🎵 Now Playing Winners'}
+              </h2>
+              <p className="player-subtext">
+                {votingOpen
+                  ? 'Playback controls are available. Auto-play starts when voting is closed.'
+                  : 'Auto-playing songs by rank. Use Previous/Next to navigate the queue.'}
+              </p>
+              <MusicPlayer songs={songs} autoPlay={!votingOpen} />
             </div>
           )}
 

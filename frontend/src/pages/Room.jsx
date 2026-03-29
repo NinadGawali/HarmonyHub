@@ -3,8 +3,10 @@ import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { songAPI } from '../api/api';
 import useSocket from '../hooks/useSocket';
 import Leaderboard from '../components/Leaderboard';
+import SideSongPlayer from '../components/SideSongPlayer';
 import { socket } from '../socket/socket';
 import { ArrowLeft, Users, Wifi, WifiOff } from 'lucide-react';
+import useSpotifyPlayer from '../spotify/hooks/useSpotifyPlayer';
 
 export default function Room() {
   const { roomId } = useParams();
@@ -19,8 +21,76 @@ export default function Room() {
   const [songRequest, setSongRequest] = useState('');
   const [requestStatus, setRequestStatus] = useState('');
   const [submittingRequest, setSubmittingRequest] = useState(false);
+  const [spotifyUiError, setSpotifyUiError] = useState('');
+  const [selectedSongId, setSelectedSongId] = useState(null);
   const userName = location.state?.userName || 'Guest';
   const [userId] = useState(`${userName}_${Date.now()}`);
+
+  const {
+    isAuthenticated: spotifyAuthenticated,
+    playerReady: spotifyReady,
+    deviceId: spotifyDeviceId,
+    status: spotifyStatus,
+    playbackState,
+    error: spotifyError,
+    startLogin,
+    initializePlayer,
+    transferPlaybackHere,
+    playTrack,
+    pausePlayback,
+    resumePlayback,
+    seekTo
+  } = useSpotifyPlayer({
+    playerName: `HarmonyHub Room ${roomId}`
+  });
+
+  useEffect(() => {
+    if (!selectedSongId) {
+      return;
+    }
+
+    const stillExists = songs.some((song) => song.songId === selectedSongId);
+    if (!stillExists) {
+      setSelectedSongId(null);
+    }
+  }, [selectedSongId, songs]);
+
+  const ensureSpotifyReady = useCallback(async () => {
+    if (!spotifyAuthenticated) {
+      await startLogin(`/room/${roomId}`);
+      return false;
+    }
+
+    if (!spotifyReady) {
+      await initializePlayer();
+    }
+
+    // Always transfer playback here so the local Web Playback device becomes active.
+    await transferPlaybackHere(false);
+
+    return true;
+  }, [initializePlayer, roomId, spotifyAuthenticated, spotifyReady, startLogin, transferPlaybackHere]);
+
+  const playSongById = useCallback(async (songId, positionMs = 0) => {
+    if (!songId) {
+      return;
+    }
+
+    setSpotifyUiError('');
+
+    try {
+      const ready = await ensureSpotifyReady();
+      if (!ready) {
+        return;
+      }
+
+      await playTrack(`spotify:track:${songId}`, positionMs);
+      setSelectedSongId(songId);
+    } catch (error) {
+      console.error('Failed to play selected song:', error);
+      setSpotifyUiError(error.message || 'Failed to play song on Spotify');
+    }
+  }, [ensureSpotifyReady, playTrack]);
 
   // Handle leaderboard updates
   const handleLeaderboardUpdate = useCallback((leaderboard) => {
@@ -104,6 +174,77 @@ export default function Room() {
     }
 
     socket.emit('vote_song', { roomId, songId, userId });
+  };
+
+  const handleSongSelect = (song) => {
+    if (!song?.songId) {
+      return;
+    }
+
+    playSongById(song.songId, 0);
+  };
+
+  const handleConnectSpotify = async () => {
+    setSpotifyUiError('');
+    try {
+      await ensureSpotifyReady();
+    } catch (error) {
+      setSpotifyUiError(error.message || 'Failed to connect Spotify player');
+    }
+  };
+
+  const currentSongIndex = songs.findIndex((song) => song.songId === selectedSongId);
+  const canGoPrev = currentSongIndex > 0;
+  const canGoNext = currentSongIndex >= 0 && currentSongIndex < songs.length - 1;
+
+  const handlePrevSong = async () => {
+    if (!canGoPrev) {
+      return;
+    }
+
+    const previousSong = songs[currentSongIndex - 1];
+    await playSongById(previousSong?.songId, 0);
+  };
+
+  const handleNextSong = async () => {
+    if (!canGoNext) {
+      return;
+    }
+
+    const nextSong = songs[currentSongIndex + 1];
+    await playSongById(nextSong?.songId, 0);
+  };
+
+  const handleTogglePlayPause = async () => {
+    setSpotifyUiError('');
+    try {
+      const ready = await ensureSpotifyReady();
+      if (!ready) {
+        return;
+      }
+
+      if (playbackState?.isPaused) {
+        await resumePlayback();
+      } else {
+        await pausePlayback();
+      }
+    } catch (error) {
+      setSpotifyUiError(error.message || 'Failed to update playback state');
+    }
+  };
+
+  const handleSeek = async (positionMs) => {
+    setSpotifyUiError('');
+    try {
+      const ready = await ensureSpotifyReady();
+      if (!ready) {
+        return;
+      }
+
+      await seekTo(positionMs);
+    } catch (error) {
+      setSpotifyUiError(error.message || 'Failed to seek playback');
+    }
   };
 
   const handleSongRequestSubmit = (e) => {
@@ -191,13 +332,39 @@ export default function Room() {
           </div>
         )}
         
-        <Leaderboard
-          songs={songs}
-          onVote={handleVote}
-          showVoteButton={votingOpen}
-          isAdmin={false}
-          votedSongs={votedSongs}
-        />
+        <div className="room-main-grid">
+          <div className="room-main-leaderboard">
+            <Leaderboard
+              songs={songs}
+              onVote={handleVote}
+              showVoteButton={votingOpen}
+              isAdmin={false}
+              votedSongs={votedSongs}
+              onSongSelect={handleSongSelect}
+              activeSongId={selectedSongId}
+            />
+          </div>
+
+          <SideSongPlayer
+            songs={songs}
+            selectedSongId={selectedSongId}
+            spotifyReady={spotifyReady}
+            spotifyAuthenticated={spotifyAuthenticated}
+            spotifyStatus={spotifyStatus}
+            spotifyDeviceId={spotifyDeviceId}
+            spotifyError={spotifyUiError || spotifyError}
+            playbackState={playbackState}
+            onConnectSpotify={handleConnectSpotify}
+            onTogglePlayPause={handleTogglePlayPause}
+            onSeek={handleSeek}
+            onPrev={handlePrevSong}
+            onNext={handleNextSong}
+            canGoPrev={canGoPrev}
+            canGoNext={canGoNext}
+            currentIndex={Math.max(currentSongIndex, 0)}
+            totalSongs={songs.length}
+          />
+        </div>
       </main>
     </div>
   );

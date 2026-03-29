@@ -3,6 +3,7 @@ const cors = require('cors');
 const roomRoutes = require('./routes/roomRoutes');
 const songRoutes = require('./routes/songRoutes');
 const spotifyRoutes = require('./routes/spotifyRoutes');
+const spotifyAuthRoutes = require('./routes/spotifyAuthRoutes');
 const locationRoutes = require('./routes/locationRoutes');
 
 const app = express();
@@ -25,6 +26,7 @@ app.get('/health', (req, res) => {
 app.use('/api/rooms', roomRoutes);
 app.use('/api/rooms', songRoutes);
 app.use('/api/spotify', spotifyRoutes);
+app.use('/api/spotify/auth', spotifyAuthRoutes);
 app.use('/api/location', locationRoutes);
 
 // 404 handler

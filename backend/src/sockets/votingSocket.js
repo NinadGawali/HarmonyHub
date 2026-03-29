@@ -135,6 +135,51 @@ module.exports = (io) => {
       }
     });
 
+    // Relay Spotify playback commands to all clients in a room.
+    socket.on('spotify_control', (data) => {
+      try {
+        const { roomId, action, payload } = data || {};
+
+        if (!roomId || !action) {
+          socket.emit('error', { message: 'Invalid Spotify control payload' });
+          return;
+        }
+
+        io.to(roomId).emit('spotify_control', {
+          action,
+          payload: payload || {},
+          originSocketId: socket.id,
+          serverTimestamp: Date.now()
+        });
+      } catch (error) {
+        console.error('Error relaying Spotify control event:', error);
+        socket.emit('error', { message: 'Failed to relay Spotify control event' });
+      }
+    });
+
+    // Relay periodic playback state snapshots to tighten drift between clients.
+    socket.on('spotify_sync_state', (data) => {
+      try {
+        const { roomId, trackUri, positionMs, isPaused } = data || {};
+
+        if (!roomId || !trackUri) {
+          socket.emit('error', { message: 'Invalid Spotify sync payload' });
+          return;
+        }
+
+        socket.to(roomId).emit('spotify_sync_state', {
+          trackUri,
+          positionMs: Number(positionMs || 0),
+          isPaused: Boolean(isPaused),
+          originSocketId: socket.id,
+          serverTimestamp: Date.now()
+        });
+      } catch (error) {
+        console.error('Error relaying Spotify sync event:', error);
+        socket.emit('error', { message: 'Failed to relay Spotify sync event' });
+      }
+    });
+
     // Submit song request (participant)
     socket.on('submit_song_request', async (data) => {
       try {
