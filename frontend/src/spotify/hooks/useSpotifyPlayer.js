@@ -188,6 +188,10 @@ export default function useSpotifyPlayer(options = {}) {
   }, [withTokenRetry]);
 
   const startLogin = useCallback(async (returnPath = window.location.pathname) => {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      throw new Error('You are offline. Reconnect to the internet before connecting Spotify.');
+    }
+
     const redirectUri = getSpotifyRedirectUri();
     const state = buildOAuthState();
 
@@ -206,6 +210,10 @@ export default function useSpotifyPlayer(options = {}) {
   const initializePlayer = useCallback(async () => {
     if (playerRef.current) {
       return playerRef.current;
+    }
+
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      throw new Error('You are offline. Reconnect to the internet before starting the Spotify player.');
     }
 
     const token = await getValidAccessToken();

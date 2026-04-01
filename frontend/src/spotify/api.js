@@ -13,6 +13,10 @@ export class SpotifyApiError extends Error {
 }
 
 async function requestSpotify({ method, path, accessToken, params, data }) {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    throw new SpotifyApiError('You are offline. Reconnect to the internet and try again.', 0, null);
+  }
+
   try {
     const response = await axios({
       method,
@@ -27,6 +31,10 @@ async function requestSpotify({ method, path, accessToken, params, data }) {
 
     return response.data || null;
   } catch (error) {
+    if (error?.code === 'ERR_NETWORK' || /network error/i.test(error?.message || '')) {
+      throw new SpotifyApiError('Network error. Check your internet connection and try again.', 0, null);
+    }
+
     const status = error.response?.status || 500;
     const payload = error.response?.data || null;
     const message = payload?.error?.message || error.message || 'Spotify API request failed';
