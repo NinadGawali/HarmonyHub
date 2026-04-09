@@ -33,6 +33,12 @@ export const spotifyAPI = {
 // Location APIs
 export const locationAPI = {
   send: (locationData) => api.post('/location', locationData),
+  getLatest: () => api.get('/location/latest'),
+};
+
+// Playlist APIs
+export const playlistAPI = {
+  generateRecommendations: (payload) => api.post('/playlists/recommendations', payload),
 };
 
 export default api;

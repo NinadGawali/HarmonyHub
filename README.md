@@ -249,8 +249,11 @@ PORT=3000
 REDIS_URL=redis://localhost:6379
 SPOTIFY_CLIENT_ID=your_actual_client_id_here
 SPOTIFY_CLIENT_SECRET=your_actual_client_secret_here
+GOOGLE_API_KEY=your_google_gemini_api_key_here
 CORS_ORIGIN=http://localhost:5173
 ```
+
+Create `backend/.env` by copying `backend/.env.example`, then fill in the values above. The AI playlist generator uses `GOOGLE_API_KEY` for Gemini; if it is missing, the app falls back to non-AI recommendations.
 
 ### 3. Frontend Setup
 

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Play, Pause, SkipForward, SkipBack, Volume2, VolumeX, Music } from 'lucide-react';
 
-export default function MusicPlayer({ songs, autoPlay = false }) {
+export default function MusicPlayer({ songs, autoPlay = false, initialSongId = null }) {
   const [playableQueue, setPlayableQueue] = useState([]);
   const [currentQueueIndex, setCurrentQueueIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -42,6 +42,17 @@ export default function MusicPlayer({ songs, autoPlay = false }) {
       return filtered;
     });
   }, [songs]);
+
+  useEffect(() => {
+    if (!initialSongId || !playableQueue.length) {
+      return;
+    }
+
+    const nextIndex = playableQueue.findIndex((song) => song.songId === initialSongId);
+    if (nextIndex >= 0) {
+      setCurrentQueueIndex(nextIndex);
+    }
+  }, [initialSongId, playableQueue]);
 
   useEffect(() => {
     if (currentSong) {

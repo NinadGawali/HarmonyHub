@@ -5,6 +5,7 @@ const songRoutes = require('./routes/songRoutes');
 const spotifyRoutes = require('./routes/spotifyRoutes');
 const spotifyAuthRoutes = require('./routes/spotifyAuthRoutes');
 const locationRoutes = require('./routes/locationRoutes');
+const playlistRoutes = require('./routes/playlistRoutes');
 
 const app = express();
 
@@ -28,6 +29,7 @@ app.use('/api/rooms', songRoutes);
 app.use('/api/spotify', spotifyRoutes);
 app.use('/api/spotify/auth', spotifyAuthRoutes);
 app.use('/api/location', locationRoutes);
+app.use('/api/playlists', playlistRoutes);
 
 // 404 handler
 app.use((req, res) => {

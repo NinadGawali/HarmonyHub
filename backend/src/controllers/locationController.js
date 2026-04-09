@@ -1,6 +1,8 @@
 const isValidCoordinate = (value, min, max) =>
   typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max;
 
+let latestLocation = null;
+
 const receiveLocation = (req, res) => {
   const { latitude, longitude, accuracy, timestamp, source } = req.body;
 
@@ -18,6 +20,8 @@ const receiveLocation = (req, res) => {
     source: source || 'browser-geolocation'
   };
 
+  latestLocation = normalizedPayload;
+
   // For now, location is accepted and logged. Replace with DB persistence if needed.
   console.log('📍 Location update received:', normalizedPayload);
 
@@ -28,6 +32,20 @@ const receiveLocation = (req, res) => {
   });
 };
 
+const getLatestLocation = (req, res) => {
+  if (!latestLocation) {
+    return res.status(404).json({
+      error: 'No location has been captured yet.'
+    });
+  }
+
+  return res.status(200).json({
+    success: true,
+    location: latestLocation
+  });
+};
+
 module.exports = {
-  receiveLocation
+  receiveLocation,
+  getLatestLocation
 };
