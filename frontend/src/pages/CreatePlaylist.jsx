@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { playlistAPI, locationAPI, spotifyAPI } from '../api/api';
 import { Music2, Wand2, Plus, Save, Trash2, Home, Search, Play, Pause, SkipBack, SkipForward, Shuffle, Repeat } from 'lucide-react';
 import { createPlaylistRecord, getStoredPlaylists, saveStoredPlaylists } from '../utils/playlistStorage';
+import PulseVisualizer from '../components/PulseVisualizer';
 
 export default function CreatePlaylist() {
   const navigate = useNavigate();
@@ -10,6 +11,9 @@ export default function CreatePlaylist() {
   const [artist, setArtist] = useState('');
   const [count, setCount] = useState(8);
   const [playlistName, setPlaylistName] = useState('My AI Playlist');
+  const [chatMessages, setChatMessages] = useState([]);
+  const [latestSuggestedSongs, setLatestSuggestedSongs] = useState([]);
+  const [selectedSuggestionIds, setSelectedSuggestionIds] = useState([]);
   const [aiRecommendations, setAiRecommendations] = useState([]);
   const [regionalRecommendations, setRegionalRecommendations] = useState([]);
   const [regionName, setRegionName] = useState('');
@@ -25,8 +29,18 @@ export default function CreatePlaylist() {
   const [durationSec, setDurationSec] = useState(0);
   const [queueOrder, setQueueOrder] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [generationMode, setGenerationMode] = useState('ai');
   const [error, setError] = useState('');
   const audioRef = useRef(null);
+
+  const commandSeed = useMemo(() => `${description.trim()}|${artist.trim()}|${count}|${generationMode}`, [artist, count, description, generationMode]);
+  const commandVariant = useMemo(() => {
+    const text = `${description} ${artist}`.toLowerCase();
+    if (/ambient|chill|lofi|downtempo/.test(text)) return 'calm';
+    if (/house|dance|club|party|electro|edm|techno/.test(text)) return 'burst';
+    if (/rock|indie|alt|garage|punk/.test(text)) return 'pulse';
+    return generationMode === 'location' ? 'wave' : 'pulse';
+  }, [artist, description, generationMode]);
 
   useEffect(() => {
     setSavedPlaylists(getStoredPlaylists());
@@ -46,34 +60,73 @@ export default function CreatePlaylist() {
     }
   };
 
-  const handleGenerate = async (e) => {
-    e.preventDefault();
+  const handleGenerateByType = async (mode) => {
     setError('');
 
-    if (!description.trim()) {
+    if (mode === 'ai' && !description.trim()) {
       setError('Please describe the type of songs you want.');
       return;
     }
 
     setLoading(true);
+    setGenerationMode(mode);
 
     try {
-      const location = await getLatestLocation();
-      const response = await playlistAPI.generateRecommendations({
+      let location = null;
+      if (mode === 'location') {
+        const latestLocation = await getLatestLocation();
+        const state = latestLocation?.state ? String(latestLocation.state).trim() : '';
+
+        if (!state) {
+          setError('Location-based recommendations require your state. Please allow location once and retry.');
+          return;
+        }
+
+        location = { state };
+      }
+
+      const payload = {
         description: description.trim(),
         artist: artist.trim(),
         count: Number(count),
         location
-      });
+      };
 
+      const response = mode === 'location'
+        ? await playlistAPI.generateLocationRecommendations(payload)
+        : await playlistAPI.generateAIRecommendations(payload);
+
+      const mergedRecommendations = response.data.recommendations || [];
       setAiRecommendations(response.data.aiRecommendations || []);
       setRegionalRecommendations(response.data.regionalRecommendations || []);
       setRegionName(response.data.regionName || 'Your Region');
+      setLatestSuggestedSongs(mergedRecommendations);
+      setSelectedSuggestionIds([]);
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          prompt: mode === 'location' ? `Location-based request${description.trim() ? `: ${description.trim()}` : ''}` : description.trim(),
+          response: response.data.chatResponse || 'Here are your recommendations.',
+          songs: mergedRecommendations,
+          locationLabel: response.data.regionName || ''
+        }
+      ]);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to generate recommendations');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleGenerateAI = (e) => {
+    e.preventDefault();
+    handleGenerateByType('ai');
+  };
+
+  const handleGenerateLocation = (e) => {
+    e.preventDefault();
+    handleGenerateByType('location');
   };
 
   const selectedSongIds = new Set(selectedSongs.map((song) => song.songId));
@@ -88,6 +141,48 @@ export default function CreatePlaylist() {
 
   const addSongAndFocus = (song) => {
     addSong(song);
+    setError('');
+  };
+
+  const toggleSuggestionSelection = (songId) => {
+    setSelectedSuggestionIds((prev) => {
+      if (prev.includes(songId)) {
+        return prev.filter((id) => id !== songId);
+      }
+
+      return [...prev, songId];
+    });
+  };
+
+  const toggleSelectAllSuggestions = () => {
+    if (!latestSuggestedSongs.length) {
+      return;
+    }
+
+    if (selectedSuggestionIds.length === latestSuggestedSongs.length) {
+      setSelectedSuggestionIds([]);
+      return;
+    }
+
+    setSelectedSuggestionIds(latestSuggestedSongs.map((song) => song.songId));
+  };
+
+  const addSelectedSuggestionsToPlaylist = () => {
+    if (!selectedSuggestionIds.length) {
+      setError('Select songs from the AI response first.');
+      return;
+    }
+
+    const selectedMap = new Set(selectedSuggestionIds);
+    const songsToAdd = latestSuggestedSongs.filter((song) => selectedMap.has(song.songId));
+    const uniqueSongs = songsToAdd.filter((song) => !selectedSongIds.has(song.songId));
+
+    if (!uniqueSongs.length) {
+      setError('Selected songs are already in your playlist.');
+      return;
+    }
+
+    setSelectedSongs((prev) => [...prev, ...uniqueSongs]);
     setError('');
   };
 
@@ -341,7 +436,20 @@ export default function CreatePlaylist() {
           <h1>Create Playlist With AI</h1>
           <p>Describe your mood, style, and artists. Add recommended songs to build your playlist.</p>
 
-          <form onSubmit={handleGenerate} className="generator-form">
+          <div className="ai-hero-strip">
+            <div className="ai-hero-copy">
+              <span className="section-pill">AI Command Center</span>
+              <h2>{generationMode === 'location' ? 'State-driven music discovery' : 'Prompt-driven playlist generation'}</h2>
+              <p>
+                {generationMode === 'location'
+                  ? 'Captured once, then reused. The experience now leans into your state with subtle animated regional energy.'
+                  : 'Use your mood and favorite artist to steer a live visual composition that reacts on the client only.'}
+              </p>
+            </div>
+            <PulseVisualizer seed={commandSeed} variant={commandVariant} />
+          </div>
+
+          <form onSubmit={handleGenerateAI} className="generator-form">
             <textarea
               rows={4}
               value={description}
@@ -361,13 +469,89 @@ export default function CreatePlaylist() {
               value={count}
               onChange={(e) => setCount(Number(e.target.value))}
             />
-            <button className="btn-primary" type="submit" disabled={loading}>
-              <Wand2 size={16} />
-              <span>{loading ? 'Generating...' : 'Generate Recommendations'}</span>
-            </button>
+            <div className="generator-actions-row">
+              <button className="btn-primary" type="button" disabled={loading} onClick={handleGenerateAI}>
+                <Wand2 size={16} />
+                <span>{loading && generationMode === 'ai' ? 'Generating AI...' : 'Generate AI Playlist'}</span>
+              </button>
+              <button className="btn-secondary" type="button" disabled={loading} onClick={handleGenerateLocation}>
+                <Wand2 size={16} />
+                <span>{loading && generationMode === 'location' ? 'Generating Location...' : 'Generate Location Playlist'}</span>
+              </button>
+            </div>
           </form>
 
+          {loading && (
+            <div className="ai-loading-panel">
+              <div className="ai-loading-header">
+                <span className="section-pill">Composing response</span>
+                <span className="ai-loading-note">Frontend-only animated preview</span>
+              </div>
+              <PulseVisualizer seed={commandSeed} variant={generationMode === 'location' ? 'wave' : commandVariant} bars={10} />
+              <div className="ai-loading-bars">
+                <span />
+                <span />
+                <span />
+                <span />
+              </div>
+            </div>
+          )}
+
           {error && <p className="error-message">{error}</p>}
+
+          <section className="chat-window-panel">
+            <div className="section-title-row">
+              <h2>AI Chat Window</h2>
+              <span>Prompt and response with selectable songs</span>
+            </div>
+
+            {chatMessages.length === 0 ? (
+              <p className="empty-copy">Send a prompt to see recommendations in chat format.</p>
+            ) : (
+              <div className="chat-window-list">
+                {chatMessages.map((message, index) => (
+                  <article key={message.id} className="chat-message-block">
+                    <div className="chat-bubble chat-bubble-user">
+                      <p>{message.prompt}</p>
+                    </div>
+                    <div className="chat-bubble chat-bubble-ai">
+                      <p>{message.response}</p>
+                      {message.locationLabel && <p className="song-reason">Location: {message.locationLabel}</p>}
+                    </div>
+
+                    {index === chatMessages.length - 1 && message.songs.length > 0 && (
+                      <div className="chat-song-selection">
+                        <div className="chat-selection-actions">
+                          <button type="button" className="btn-secondary" onClick={toggleSelectAllSuggestions}>
+                            {selectedSuggestionIds.length === latestSuggestedSongs.length ? 'Clear Selection' : 'Select All'}
+                          </button>
+                          <button type="button" className="btn-primary" onClick={addSelectedSuggestionsToPlaylist}>
+                            <Plus size={16} />
+                            <span>Auto Add Selected Songs</span>
+                          </button>
+                        </div>
+
+                        {message.songs.map((song) => (
+                          <label key={`chat-song-${song.songId}`} className="chat-song-row">
+                            <input
+                              type="checkbox"
+                              checked={selectedSuggestionIds.includes(song.songId)}
+                              onChange={() => toggleSuggestionSelection(song.songId)}
+                            />
+                            <div>
+                              <p className="song-title">{song.title}</p>
+                              <p className="song-meta">{song.artist}</p>
+                              {song.reason && <p className="song-reason">{song.reason}</p>}
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
 
           <div className="recommendations-wrapper">
             <RecommendationList

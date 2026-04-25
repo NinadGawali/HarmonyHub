@@ -2,11 +2,36 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { MapPin, Navigation, AlertTriangle, Ban } from 'lucide-react';
 import { locationAPI } from '../api/api';
 
+const LOCATION_STORAGE_KEY = 'harmonyhub.location.v1';
+
 export default function LocationTracker() {
-  const watchIdRef = useRef(null);
+  const hasCapturedOnceRef = useRef(false);
+  const lastResolvedKeyRef = useRef('');
   const [location, setLocation] = useState(null);
   const [status, setStatus] = useState('idle');
   const [message, setMessage] = useState('Location permission not requested yet.');
+
+  const resolveCityState = useCallback(async (latitude, longitude) => {
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(latitude)}&lon=${encodeURIComponent(longitude)}`
+      );
+
+      if (!response.ok) {
+        return { city: '', state: '' };
+      }
+
+      const payload = await response.json();
+      const address = payload?.address || {};
+
+      return {
+        city: address.city || address.town || address.village || address.municipality || '',
+        state: address.state || address.region || ''
+      };
+    } catch (_error) {
+      return { city: '', state: '' };
+    }
+  }, []);
 
   const sendLocationToBackend = useCallback(async (coords) => {
     try {
@@ -14,6 +39,8 @@ export default function LocationTracker() {
         latitude: coords.latitude,
         longitude: coords.longitude,
         accuracy: coords.accuracy,
+        city: coords.city,
+        state: coords.state,
         timestamp: new Date().toISOString(),
         source: 'browser-geolocation'
       });
@@ -22,22 +49,39 @@ export default function LocationTracker() {
     }
   }, []);
 
-  const handleSuccess = useCallback(
-    (position) => {
-      const latestLocation = {
-        latitude: position.coords.latitude,
-        longitude: position.coords.longitude,
-        accuracy: position.coords.accuracy,
-        timestamp: new Date(position.timestamp).toISOString()
-      };
+  const handleSuccess = useCallback(async (position) => {
+    const latitude = position.coords.latitude;
+    const longitude = position.coords.longitude;
+    const approximateKey = `${latitude.toFixed(2)}:${longitude.toFixed(2)}`;
 
-      setLocation(latestLocation);
-      setStatus('granted');
-      setMessage('Location tracking active.');
-      sendLocationToBackend(latestLocation);
-    },
-    [sendLocationToBackend]
-  );
+    let cityState = { city: '', state: '' };
+    if (lastResolvedKeyRef.current !== approximateKey) {
+      cityState = await resolveCityState(latitude, longitude);
+      lastResolvedKeyRef.current = approximateKey;
+    } else if (location) {
+      cityState = { city: location.city || '', state: location.state || '' };
+    }
+
+    const latestLocation = {
+      latitude: position.coords.latitude,
+      longitude: position.coords.longitude,
+      accuracy: position.coords.accuracy,
+      city: cityState.city,
+      state: cityState.state,
+      timestamp: new Date(position.timestamp).toISOString()
+    };
+
+    try {
+      localStorage.setItem(LOCATION_STORAGE_KEY, JSON.stringify(latestLocation));
+    } catch (_error) {
+      // Ignore storage failures and continue with in-memory state.
+    }
+
+    setLocation(latestLocation);
+    setStatus('granted');
+    setMessage('Location captured and saved.');
+    sendLocationToBackend(latestLocation);
+  }, [location, resolveCityState, sendLocationToBackend]);
 
   const handleError = useCallback((error) => {
     if (error.code === error.PERMISSION_DENIED) {
@@ -62,14 +106,7 @@ export default function LocationTracker() {
     setMessage('Failed to retrieve location.');
   }, []);
 
-  const stopTracking = useCallback(() => {
-    if (watchIdRef.current !== null && navigator.geolocation) {
-      navigator.geolocation.clearWatch(watchIdRef.current);
-      watchIdRef.current = null;
-    }
-  }, []);
-
-  const startTracking = useCallback(() => {
+  const captureLocationOnce = useCallback(() => {
     if (!navigator.geolocation) {
       setStatus('unsupported');
       setMessage('Geolocation is not supported by this browser.');
@@ -79,22 +116,38 @@ export default function LocationTracker() {
     setStatus('requesting');
     setMessage('Requesting location permission...');
 
-    stopTracking();
-
-    watchIdRef.current = navigator.geolocation.watchPosition(handleSuccess, handleError, {
+    navigator.geolocation.getCurrentPosition(handleSuccess, handleError, {
       enableHighAccuracy: true,
       timeout: 15000,
-      maximumAge: 5000
+      maximumAge: 300000
     });
-  }, [handleError, handleSuccess, stopTracking]);
+  }, [handleError, handleSuccess]);
 
   useEffect(() => {
-    startTracking();
+    if (hasCapturedOnceRef.current) {
+      return;
+    }
 
-    return () => {
-      stopTracking();
-    };
-  }, [startTracking, stopTracking]);
+    hasCapturedOnceRef.current = true;
+
+    try {
+      const cachedRaw = localStorage.getItem(LOCATION_STORAGE_KEY);
+      if (cachedRaw) {
+        const cachedLocation = JSON.parse(cachedRaw);
+        if (cachedLocation && cachedLocation.state) {
+          setLocation(cachedLocation);
+          setStatus('granted');
+          setMessage('Using saved location.');
+          sendLocationToBackend(cachedLocation);
+          return;
+        }
+      }
+    } catch (_error) {
+      // Continue to fresh capture if cache is invalid.
+    }
+
+    captureLocationOnce();
+  }, [captureLocationOnce, sendLocationToBackend]);
 
   const getStatusIcon = () => {
     if (status === 'denied') return <Ban size={16} />;
@@ -109,7 +162,7 @@ export default function LocationTracker() {
         <span className="location-icon">{getStatusIcon()}</span>
         <span>{message}</span>
         {(status === 'denied' || status === 'error' || status === 'unsupported') && (
-          <button className="location-retry" onClick={startTracking} type="button">
+          <button className="location-retry" onClick={captureLocationOnce} type="button">
             Retry
           </button>
         )}
@@ -117,8 +170,9 @@ export default function LocationTracker() {
 
       {location && (
         <div className="location-data">
-          <span>Lat: {location.latitude.toFixed(6)}</span>
-          <span>Lng: {location.longitude.toFixed(6)}</span>
+          {(location.city || location.state) && <span>{[location.city, location.state].filter(Boolean).join(', ')}</span>}
+          <span>Lat: {location.latitude.toFixed(4)}</span>
+          <span>Lng: {location.longitude.toFixed(4)}</span>
           <span>Accuracy: {Math.round(location.accuracy || 0)}m</span>
         </div>
       )}

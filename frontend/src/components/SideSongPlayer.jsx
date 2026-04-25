@@ -1,5 +1,6 @@
 import React, { useCallback } from 'react';
 import { Music, Play, Pause, SkipBack, SkipForward } from 'lucide-react';
+import PulseVisualizer from './PulseVisualizer';
 
 export default function SideSongPlayer({
   songs,
@@ -21,6 +22,7 @@ export default function SideSongPlayer({
   totalSongs
 }) {
   const currentSong = (songs || []).find((song) => song.songId === selectedSongId) || null;
+  const visualizerSeed = `${currentSong?.title || ''}|${currentSong?.artist || ''}`;
 
   const formatTime = useCallback((ms) => {
     const seconds = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
@@ -62,7 +64,10 @@ export default function SideSongPlayer({
     <aside className="side-player">
       <p className="side-player-label">Now Playing</p>
       {currentSong.image ? (
-        <img src={currentSong.image} alt={currentSong.title} className="side-player-image" />
+        <div className="side-player-artframe">
+          <img src={currentSong.image} alt={currentSong.title} className="side-player-image" />
+          <PulseVisualizer seed={visualizerSeed} variant="pulse" bars={5} />
+        </div>
       ) : (
         <div className="side-player-image side-player-image-fallback">
           <Music size={26} />
@@ -123,6 +128,10 @@ export default function SideSongPlayer({
         >
           <SkipForward size={18} />
         </button>
+      </div>
+
+      <div className="side-player-visual-group" aria-hidden="true">
+        <PulseVisualizer seed={visualizerSeed} variant="wave" bars={7} />
       </div>
 
       <p className="side-player-queue-state">

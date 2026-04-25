@@ -39,6 +39,8 @@ export const locationAPI = {
 // Playlist APIs
 export const playlistAPI = {
   generateRecommendations: (payload) => api.post('/playlists/recommendations', payload),
+  generateAIRecommendations: (payload) => api.post('/playlists/recommendations/ai', payload),
+  generateLocationRecommendations: (payload) => api.post('/playlists/recommendations/location', payload),
 };
 
 export default api;

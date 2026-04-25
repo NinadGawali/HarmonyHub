@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Play, Pause, SkipForward, SkipBack, Volume2, VolumeX, Music } from 'lucide-react';
+import PulseVisualizer from './PulseVisualizer';
 
 export default function MusicPlayer({ songs, autoPlay = false, initialSongId = null }) {
   const [playableQueue, setPlayableQueue] = useState([]);
@@ -14,6 +15,7 @@ export default function MusicPlayer({ songs, autoPlay = false, initialSongId = n
   const advancingRef = useRef(false);
 
   const currentSong = playableQueue[currentQueueIndex];
+  const visualizerSeed = `${currentSong?.title || ''}|${currentSong?.artist || ''}`;
 
   const formatTime = useCallback((seconds) => {
     const safeSeconds = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
@@ -216,9 +218,16 @@ export default function MusicPlayer({ songs, autoPlay = false, initialSongId = n
       />
 
       <div className="player-info">
-        {currentSong?.image && (
-          <img src={currentSong.image} alt={currentSong.title} className="player-image" />
-        )}
+        <div className="player-image-shell">
+          {currentSong?.image ? (
+            <img src={currentSong.image} alt={currentSong.title} className="player-image" />
+          ) : (
+            <div className="player-image player-image-fallback">
+              <Music size={28} />
+            </div>
+          )}
+          <PulseVisualizer seed={visualizerSeed} variant="wave" bars={6} />
+        </div>
         <div className="player-text">
           <h4 className="player-title">{currentSong?.title}</h4>
           <p className="player-artist">{currentSong?.artist}</p>
@@ -287,6 +296,11 @@ export default function MusicPlayer({ songs, autoPlay = false, initialSongId = n
           Queue: {currentQueueIndex + 1} / {playableQueue.length}
           {autoPlay && <span> (auto-play)</span>}
         </p>
+        <div className="player-orbit-line" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </div>
       </div>
     </div>
   );

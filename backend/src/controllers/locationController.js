@@ -4,7 +4,7 @@ const isValidCoordinate = (value, min, max) =>
 let latestLocation = null;
 
 const receiveLocation = (req, res) => {
-  const { latitude, longitude, accuracy, timestamp, source } = req.body;
+  const { latitude, longitude, accuracy, timestamp, source, city, state } = req.body;
 
   if (!isValidCoordinate(latitude, -90, 90) || !isValidCoordinate(longitude, -180, 180)) {
     return res.status(400).json({
@@ -17,7 +17,9 @@ const receiveLocation = (req, res) => {
     longitude,
     accuracy: typeof accuracy === 'number' && Number.isFinite(accuracy) ? accuracy : null,
     timestamp: timestamp || new Date().toISOString(),
-    source: source || 'browser-geolocation'
+    source: source || 'browser-geolocation',
+    city: city ? String(city).trim() : '',
+    state: state ? String(state).trim() : ''
   };
 
   latestLocation = normalizedPayload;

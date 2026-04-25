@@ -1,29 +1,8 @@
-const parseJsonPayload = (responseText) => {
-  if (!responseText || typeof responseText !== 'string') {
-    return null;
-  }
+const axios = require('axios');
 
-  const trimmed = responseText.trim();
+const PYTHON_RECOMMENDER_URL = process.env.PYTHON_RECOMMENDER_URL || 'http://127.0.0.1:5001';
 
-  try {
-    return JSON.parse(trimmed);
-  } catch (_error) {
-    const start = trimmed.indexOf('{');
-    const end = trimmed.lastIndexOf('}');
-
-    if (start >= 0 && end > start) {
-      try {
-        return JSON.parse(trimmed.slice(start, end + 1));
-      } catch (_nestedError) {
-        return null;
-      }
-    }
-
-    return null;
-  }
-};
-
-const fallbackSongs = (artist, mood, count = 8) => {
+const fallbackSongs = (artist, mood, count = 8, source = 'ai') => {
   const baseArtists = artist
     ? [artist, 'The Weeknd', 'Atif Aslam', 'Jal', 'Arijit Singh', 'Bad Bunny']
     : ['The Weeknd', 'Atif Aslam', 'Jal', 'Arijit Singh', 'Bad Bunny', 'Burna Boy'];
@@ -31,161 +10,93 @@ const fallbackSongs = (artist, mood, count = 8) => {
   return Array.from({ length: count }).map((_, index) => ({
     title: `${mood || 'Vibe'} Track ${index + 1}`,
     artist: baseArtists[index % baseArtists.length],
-    reason: 'Generated using fallback mode when AI provider is unavailable.'
+    reason: 'Fast fallback recommendation.',
+    source
   }));
 };
 
-const getWorkflowModules = async () => {
-  const [{ ChatGoogleGenerativeAI }, { StateGraph, START, END }] = await Promise.all([
-    import('@langchain/google-genai'),
-    import('@langchain/langgraph')
-  ]);
+const buildFallbackResponse = ({ moodPrompt, artist, locationLabel, count, mode }) => {
+  const normalizedCount = Number.isFinite(Number(count)) ? Math.max(4, Math.min(15, Number(count))) : 8;
+  const source = mode === 'location' ? 'regional' : 'ai';
 
   return {
-    ChatGoogleGenerativeAI,
-    StateGraph,
-    START,
-    END
+    assistantMessage: mode === 'location'
+      ? (locationLabel
+        ? `Using fallback: local picks based on ${locationLabel}.`
+        : 'Using fallback: local style picks.')
+      : 'Using fallback: AI picks for your prompt.',
+    songs: fallbackSongs(artist, moodPrompt, normalizedCount, source),
+    locationLabel,
+    usedFallback: true
   };
 };
 
-const buildModel = (ChatGoogleGenerativeAI) => {
-  return new ChatGoogleGenerativeAI({
-    model: 'gemini-2.5-flash',
-    temperature: 0.6,
-    apiKey: process.env.GOOGLE_API_KEY
+const requestPythonRecommendations = async (payload) => {
+  const { mode } = payload;
+  const endpoint = mode === 'location' ? '/recommend/location' : '/recommend/ai';
+
+  const response = await axios.post(`${PYTHON_RECOMMENDER_URL}${endpoint}`, payload, {
+    timeout: 12000
   });
+
+  return response.data;
 };
 
-const generateWithModel = async (model, prompt, expectedCount) => {
-  const response = await model.invoke(prompt);
-  const payload = parseJsonPayload(response.content);
-
-  if (!payload || !Array.isArray(payload.songs)) {
-    return [];
-  }
-
-  return payload.songs
-    .filter((song) => song && song.title && song.artist)
-    .slice(0, expectedCount)
-    .map((song) => ({
-      title: String(song.title).trim(),
-      artist: String(song.artist).trim(),
-      reason: song.reason ? String(song.reason).trim() : 'Matches your requested mood.'
-    }));
-};
-
-const runRecommendationGraph = async ({ moodPrompt, artist, location, count }) => {
-  const { ChatGoogleGenerativeAI, StateGraph, START, END } = await getWorkflowModules();
-  const model = buildModel(ChatGoogleGenerativeAI);
-
-  const workflow = new StateGraph({
-    channels: {
-      moodPrompt: { value: (x, y) => y ?? x, default: () => '' },
-      artist: { value: (x, y) => y ?? x, default: () => '' },
-      location: { value: (x, y) => y ?? x, default: () => null },
-      count: { value: (x, y) => y ?? x, default: () => 8 },
-      aiSongs: { value: (x, y) => y ?? x, default: () => [] },
-      regionSongs: { value: (x, y) => y ?? x, default: () => [] },
-      regionName: { value: (x, y) => y ?? x, default: () => '' }
-    }
-  });
-
-  workflow.addNode('generateAiSongs', async (state) => {
-    const prompt = [
-      'You are a music curator assistant.',
-      `Create ${state.count} playlist recommendations for this description: ${state.moodPrompt}.`,
-      `Preferred artist: ${state.artist || 'none provided'}.`,
-      'Return strict JSON only in this format:',
-      '{"songs":[{"title":"...","artist":"...","reason":"..."}]}'
-    ].join('\n');
-
-    const aiSongs = await generateWithModel(model, prompt, state.count);
-    return { aiSongs };
-  });
-
-  workflow.addNode('generateRegionalSongs', async (state) => {
-    if (!state.location || typeof state.location.latitude !== 'number' || typeof state.location.longitude !== 'number') {
-      return { regionSongs: [], regionName: '' };
-    }
-
-    const regionalPrompt = [
-      'You are a regional music expert.',
-      `Given coordinates latitude=${state.location.latitude}, longitude=${state.location.longitude}, infer a likely country or region and suggest ${Math.max(4, Math.floor(state.count / 2))} songs popular in that region.`,
-      'Return strict JSON only in this format:',
-      '{"regionName":"...","songs":[{"title":"...","artist":"...","reason":"..."}]}'
-    ].join('\n');
-
-    const response = await model.invoke(regionalPrompt);
-    const payload = parseJsonPayload(response.content);
-
-    if (!payload || !Array.isArray(payload.songs)) {
-      return { regionSongs: [], regionName: '' };
-    }
-
-    const regionSongs = payload.songs
-      .filter((song) => song && song.title && song.artist)
-      .slice(0, Math.max(4, Math.floor(state.count / 2)))
-      .map((song) => ({
-        title: String(song.title).trim(),
-        artist: String(song.artist).trim(),
-        reason: song.reason ? String(song.reason).trim() : 'Popular in your region.'
-      }));
-
-    return {
-      regionSongs,
-      regionName: payload.regionName ? String(payload.regionName).trim() : ''
-    };
-  });
-
-  workflow.addEdge(START, 'generateAiSongs');
-  workflow.addEdge('generateAiSongs', 'generateRegionalSongs');
-  workflow.addEdge('generateRegionalSongs', END);
-
-  const app = workflow.compile();
-
-  return app.invoke({
-    moodPrompt,
-    artist,
-    location,
-    count
-  });
-};
-
-const generatePlaylistRecommendations = async ({ moodPrompt, artist, location, count = 8 }) => {
+const generatePlaylistRecommendations = async ({ moodPrompt, artist, location, count = 8, mode = 'ai' }) => {
   const normalizedCount = Number.isFinite(Number(count)) ? Math.max(4, Math.min(15, Number(count))) : 8;
+  const state = location?.state ? String(location.state).trim() : '';
+  const locationLabel = state;
 
-  if (!process.env.GOOGLE_API_KEY) {
-    return {
-      aiSongs: fallbackSongs(artist, moodPrompt, normalizedCount),
-      regionSongs: location ? fallbackSongs(artist, 'Regional', Math.max(4, Math.floor(normalizedCount / 2))) : [],
-      regionName: location ? 'Your Region' : '',
-      usedFallback: true
-    };
+  if (mode === 'location' && !locationLabel) {
+    return buildFallbackResponse({
+      moodPrompt: 'Regional Mix',
+      artist,
+      locationLabel: '',
+      count: normalizedCount,
+      mode
+    });
   }
 
   try {
-    const state = await runRecommendationGraph({
+    const pythonResponse = await requestPythonRecommendations({
+      mode,
       moodPrompt,
       artist,
-      location,
+      state,
       count: normalizedCount
     });
 
+    const songs = (pythonResponse?.songs || [])
+      .filter((song) => song && song.title && song.artist)
+      .slice(0, normalizedCount)
+      .map((song) => ({
+        title: String(song.title).trim(),
+        artist: String(song.artist).trim(),
+        reason: song.reason ? String(song.reason).trim() : 'Matches your request.',
+        source: mode === 'location' ? 'regional' : (song.source === 'regional' ? 'regional' : 'ai')
+      }));
+
+    if (!songs.length) {
+      throw new Error('Python recommender returned empty songs.');
+    }
+
     return {
-      aiSongs: state.aiSongs?.length ? state.aiSongs : fallbackSongs(artist, moodPrompt, normalizedCount),
-      regionSongs: state.regionSongs || [],
-      regionName: state.regionName || '',
-      usedFallback: !state.aiSongs?.length
+      assistantMessage: pythonResponse?.assistantMessage
+        ? String(pythonResponse.assistantMessage).trim()
+        : 'Here are your recommendations.',
+      songs,
+      locationLabel,
+      usedFallback: Boolean(pythonResponse?.usedFallback)
     };
   } catch (error) {
-    console.error('AI recommendation workflow failed:', error.message);
-    return {
-      aiSongs: fallbackSongs(artist, moodPrompt, normalizedCount),
-      regionSongs: location ? fallbackSongs(artist, 'Regional', Math.max(4, Math.floor(normalizedCount / 2))) : [],
-      regionName: location ? 'Your Region' : '',
-      usedFallback: true
-    };
+    console.error('Recommendation request failed:', error.message);
+    return buildFallbackResponse({
+      moodPrompt,
+      artist,
+      locationLabel,
+      count: normalizedCount,
+      mode
+    });
   }
 };
 

@@ -26,7 +26,10 @@ export default function Leaderboard({
     <div className="leaderboard">
       <div className="leaderboard-header">
         <Trophy size={32} />
-        <h2>Leaderboard</h2>
+        <div>
+          <h2>Leaderboard</h2>
+          <p className="leaderboard-subtitle">Live ordering with depth, glow, and quick actions.</p>
+        </div>
       </div>
 
       <div className="leaderboard-list">
