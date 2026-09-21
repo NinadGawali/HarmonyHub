@@ -2,6 +2,11 @@ const votingService = require('../services/votingService');
 
 const userChannel = (userId) => `user:${userId}`;
 
+// Expose expected, user-facing errors; hide unexpected ones behind a generic message.
+const errorMessage = (error, fallback) => (
+  error instanceof votingService.RoomNotFoundError ? error.message : fallback
+);
+
 module.exports = (io) => {
   io.on('connection', (socket) => {
     console.log(`✅ User connected: ${socket.id}`);
@@ -98,7 +103,7 @@ module.exports = (io) => {
         console.log(`Song added to room ${roomId}: ${songData.title}`);
       } catch (error) {
         console.error('Error adding song:', error);
-        socket.emit('error', { message: 'Failed to add song' });
+        socket.emit('error', { message: errorMessage(error, 'Failed to add song') });
       }
     });
 
@@ -145,7 +150,7 @@ module.exports = (io) => {
         console.log(`Voting ${isOpen ? 'opened' : 'closed'} for room ${roomId}`);
       } catch (error) {
         console.error('Error toggling voting:', error);
-        socket.emit('error', { message: 'Failed to toggle voting' });
+        socket.emit('error', { message: errorMessage(error, 'Failed to toggle voting') });
       }
     });
 
@@ -219,7 +224,7 @@ module.exports = (io) => {
         });
       } catch (error) {
         console.error('Error submitting song request:', error);
-        socket.emit('error', { message: error.message || 'Failed to submit song request' });
+        socket.emit('error', { message: errorMessage(error, 'Failed to submit song request') });
       }
     });
 

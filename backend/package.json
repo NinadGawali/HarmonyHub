@@ -1,12 +1,19 @@
 {
   "name": "harmonyhub-backend",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "description": "HarmonyHub - Real-time Music Voting System Backend",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
+    "start:prod": "prisma migrate deploy && node src/server.js",
     "dev": "nodemon src/server.js",
-    "dev:recommender": "python python_recommender/app.py"
+    "dev:recommender": "python python_recommender/app.py",
+    "postinstall": "prisma generate",
+    "db:migrate": "dotenv -e .env -e ../.env -- prisma migrate dev",
+    "db:deploy": "dotenv -e .env -e ../.env -- prisma migrate deploy",
+    "db:reset": "dotenv -e .env -e ../.env -- prisma migrate reset",
+    "db:studio": "dotenv -e .env -e ../.env -- prisma studio",
+    "test": "node --test --test-concurrency=1"
   },
   "keywords": [
     "spotify",
@@ -17,17 +24,22 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@langchain/google-genai": "^0.1.6",
-    "@langchain/langgraph": "^0.2.53",
-    "express": "^4.18.2",
-    "socket.io": "^4.6.1",
-    "redis": "^4.6.5",
+    "@prisma/client": "6.19.3",
     "axios": "^1.4.0",
     "cors": "^2.8.5",
     "dotenv": "^16.0.3",
-    "nanoid": "^3.3.6"
+    "express": "^4.18.2",
+    "nanoid": "^3.3.6",
+    "prisma": "6.19.3",
+    "redis": "^4.6.5",
+    "socket.io": "^4.6.1"
   },
   "devDependencies": {
-    "nodemon": "^2.0.22"
+    "dotenv-cli": "^8.0.0",
+    "nodemon": "^2.0.22",
+    "socket.io-client": "^4.8.3"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

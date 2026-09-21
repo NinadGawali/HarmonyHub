@@ -1,55 +1,66 @@
-require('dotenv').config();
+const { config, validateConfig } = require('./config/env');
 const http = require('http');
 const { Server } = require('socket.io');
 const app = require('./app');
 const votingSocket = require('./sockets/votingSocket');
+const { connectRedis, disconnectRedis } = require('./config/redis');
+const { prisma } = require('./config/db');
 
-const PORT = process.env.PORT || 3000;
+const SHUTDOWN_TIMEOUT_MS = 10000;
 
-// Create HTTP server
 const server = http.createServer(app);
 
-// Initialize Socket.io
 const io = new Server(server, {
   cors: {
-    origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+    origin: config.corsOrigin,
     methods: ['GET', 'POST'],
     credentials: true
   }
 });
 
-// Setup socket handlers
 votingSocket(io);
 
-// Start server
-server.listen(PORT, () => {
-  console.log(`
-╔════════════════════════════════════════╗
-║     🎵 HarmonyHub Backend Server      ║
-╚════════════════════════════════════════╝
+const connectDependencies = async () => {
+  // Redis retries in the background, so this resolves once it is reachable.
+  connectRedis().catch((error) => console.error('Redis connection failed:', error.message));
 
-✅ Server running on port ${PORT}
-🔌 WebSocket ready for connections
-📡 API available at http://localhost:${PORT}
-🏥 Health check: http://localhost:${PORT}/health
+  try {
+    await prisma.$connect();
+    console.log('✅ Postgres connected');
+  } catch (error) {
+    console.error(`❌ Postgres connection failed: ${error.message.split('\n').pop()}`);
+    console.error('   Start dependencies with `npm run dev:deps` from the repo root, then `npm run db:migrate`.');
+  }
+};
 
-Environment: ${process.env.NODE_ENV || 'development'}
-  `);
-});
+const start = async () => {
+  validateConfig().forEach((problem) => console.warn(`⚠️  ${problem}`));
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down gracefully...');
-  server.close(() => {
-    console.log('Server closed');
-    process.exit(0);
+  await connectDependencies();
+
+  server.listen(config.port, () => {
+    console.log(`🎵 HarmonyHub backend listening on http://localhost:${config.port} (${config.nodeEnv})`);
+    console.log(`🏥 Health check: http://localhost:${config.port}/health`);
   });
-});
+};
 
-process.on('SIGINT', () => {
-  console.log('\nSIGINT received, shutting down gracefully...');
-  server.close(() => {
-    console.log('Server closed');
-    process.exit(0);
-  });
-});
+let shuttingDown = false;
+
+const shutdown = async (signal) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`${signal} received, shutting down...`);
+
+  const forceExit = setTimeout(() => process.exit(1), SHUTDOWN_TIMEOUT_MS);
+  forceExit.unref();
+
+  io.close();
+  server.close();
+  await Promise.allSettled([prisma.$disconnect(), disconnectRedis()]);
+  process.exit(0);
+};
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
+start();

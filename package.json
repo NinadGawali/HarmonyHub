@@ -1,0 +1,24 @@
+{
+  "name": "harmonyhub",
+  "version": "0.2.0",
+  "private": true,
+  "description": "HarmonyHub - real-time music voting for parties",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "setup": "npm install && npm install --prefix backend && npm install --prefix frontend",
+    "doctor": "node scripts/doctor.js",
+    "dev:deps": "docker compose up -d --wait",
+    "dev:deps:down": "docker compose down",
+    "dev": "concurrently -k -n backend,frontend,recommender -c green,cyan,magenta \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\" \"npm run dev:recommender --prefix backend\"",
+    "dev:web": "concurrently -k -n backend,frontend -c green,cyan \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
+    "db:migrate": "npm run db:migrate --prefix backend",
+    "db:studio": "npm run db:studio --prefix backend",
+    "build": "npm run build --prefix frontend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

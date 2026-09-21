@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { config } = require('./env');
 
 let spotifyToken = null;
 let tokenExpiry = null;
@@ -9,8 +10,7 @@ const getSpotifyToken = async () => {
     return spotifyToken;
   }
 
-  const clientId = process.env.SPOTIFY_CLIENT_ID;
-  const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
+  const { clientId, clientSecret } = config.spotify;
 
   if (!clientId || !clientSecret) {
     throw new Error('Spotify credentials not configured');

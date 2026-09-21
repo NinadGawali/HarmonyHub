@@ -1,6 +1,6 @@
 {
   "name": "harmonyhub-frontend",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "description": "HarmonyHub - Real-time Music Voting System Frontend",
   "type": "module",
   "scripts": {
@@ -9,13 +9,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "axios": "^1.4.0",
+    "lucide-react": "^0.263.1",
+    "qrcode.react": "^3.1.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.11.0",
-    "socket.io-client": "^4.6.1",
-    "axios": "^1.4.0",
-    "qrcode.react": "^3.1.0",
-    "lucide-react": "^0.263.1"
+    "socket.io-client": "^4.6.1"
   },
   "devDependencies": {
     "@types/react": "^18.2.7",

@@ -39,14 +39,14 @@ def _load_env_fallback(file_path: Path):
 
 app = Flask(__name__)
 
-if load_dotenv:
-    current_dir = Path(__file__).resolve().parent
-    load_dotenv(current_dir / ".env", override=False)
-    load_dotenv(current_dir.parent / ".env", override=False)
-else:
-    current_dir = Path(__file__).resolve().parent
-    _load_env_fallback(current_dir / ".env")
-    _load_env_fallback(current_dir.parent / ".env")
+# First file wins: recommender/.env, backend/.env, then the repo-root .env.
+current_dir = Path(__file__).resolve().parent
+env_files = [current_dir / ".env", current_dir.parent / ".env", current_dir.parent.parent / ".env"]
+for env_file in env_files:
+    if load_dotenv:
+        load_dotenv(env_file, override=False)
+    else:
+        _load_env_fallback(env_file)
 
 CACHE_TTL_SECONDS = int(os.getenv("RECOMMENDER_CACHE_TTL_SECONDS", "300"))
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("RECOMMENDER_REQUEST_TIMEOUT_SECONDS", "12"))
