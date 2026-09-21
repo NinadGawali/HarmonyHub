@@ -1,26 +1,32 @@
 import { useEffect } from 'react';
 import { socket } from '../socket/socket';
 
-export default function useSocket(roomId, onLeaderboardUpdate) {
+// Joins `roomId` over the shared socket and re-joins after every reconnect,
+// since the server forgets room membership when a connection drops.
+export default function useSocket(roomId, onLeaderboardUpdate, userId = null) {
   useEffect(() => {
-    if (!roomId) return;
+    if (!roomId) return undefined;
 
-    // Join the room
-    socket.emit('join_room', roomId);
+    const join = () => socket.emit('join_room', { roomId, userId });
 
-    // Listen for leaderboard updates
+    // If not connected yet, the 'connect' handler performs the first join.
+    if (socket.connected) {
+      join();
+    }
+    socket.on('connect', join);
+
     if (onLeaderboardUpdate) {
       socket.on('leaderboard_update', onLeaderboardUpdate);
     }
 
-    // Cleanup on unmount
     return () => {
       socket.emit('leave_room', roomId);
+      socket.off('connect', join);
       if (onLeaderboardUpdate) {
         socket.off('leaderboard_update', onLeaderboardUpdate);
       }
     };
-  }, [roomId, onLeaderboardUpdate]);
+  }, [roomId, userId, onLeaderboardUpdate]);
 
   return socket;
 }

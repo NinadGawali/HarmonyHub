@@ -7,6 +7,8 @@ import SideSongPlayer from '../components/SideSongPlayer';
 import { socket } from '../socket/socket';
 import { ArrowLeft, Users, Wifi, WifiOff } from 'lucide-react';
 import useSpotifyPlayer from '../spotify/hooks/useSpotifyPlayer';
+import { useToast } from '../components/Toast';
+import { resolveRoomIdentity } from '../utils/roomIdentity';
 
 export default function Room() {
   const { roomId } = useParams();
@@ -18,13 +20,14 @@ export default function Room() {
   const [connected, setConnected] = useState(socket.connected);
   const [votingOpen, setVotingOpen] = useState(true);
   const [votedSongs, setVotedSongs] = useState(new Set());
+  const [pendingVotes, setPendingVotes] = useState(new Set());
   const [songRequest, setSongRequest] = useState('');
   const [requestStatus, setRequestStatus] = useState('');
   const [submittingRequest, setSubmittingRequest] = useState(false);
   const [spotifyUiError, setSpotifyUiError] = useState('');
   const [selectedSongId, setSelectedSongId] = useState(null);
-  const userName = location.state?.userName || 'Guest';
-  const [userId] = useState(`${userName}_${Date.now()}`);
+  const [{ userId, userName }] = useState(() => resolveRoomIdentity(roomId, location.state));
+  const toast = useToast();
 
   const {
     isAuthenticated: spotifyAuthenticated,
@@ -98,7 +101,7 @@ export default function Room() {
   }, []);
 
   // Connect to socket
-  useSocket(roomId, handleLeaderboardUpdate);
+  useSocket(roomId, handleLeaderboardUpdate, userId);
 
   // Monitor connection status
   useEffect(() => {
@@ -109,8 +112,34 @@ export default function Room() {
       setVotingOpen(data.isOpen);
     };
 
+    const clearPending = (songId) => {
+      setPendingVotes((prev) => {
+        const next = new Set(prev);
+        next.delete(songId);
+        return next;
+      });
+    };
+
     const handleVoteSuccess = (data) => {
-      setVotedSongs(prev => new Set([...prev, data.songId]));
+      clearPending(data.songId);
+      setVotedSongs((prev) => new Set([...prev, data.songId]));
+    };
+
+    const handleVoteRejected = (data) => {
+      clearPending(data?.songId);
+      if (data?.code === 'ALREADY_VOTED') {
+        setVotedSongs((prev) => new Set([...prev, data.songId]));
+      }
+      toast.error(data?.message || 'Your vote could not be recorded');
+    };
+
+    const handleMyVotes = (data) => {
+      setVotedSongs(new Set(data?.songIds || []));
+    };
+
+    const handleSocketError = (data) => {
+      setSubmittingRequest(false);
+      toast.error(data?.message || 'Something went wrong');
     };
 
     const handleRequestSubmitted = (data) => {
@@ -121,10 +150,13 @@ export default function Room() {
 
     const handleRequestProcessed = (data) => {
       if (data?.status === 'approved') {
-        setRequestStatus(`Your request was approved${data.songTitle ? `: ${data.songTitle}` : ''}`);
+        const message = `Your request was approved${data.songTitle ? `: ${data.songTitle}` : ''}`;
+        setRequestStatus(message);
+        toast.success(message);
       }
       if (data?.status === 'rejected') {
         setRequestStatus('Your request was rejected by admin');
+        toast.info('Your request was rejected by admin');
       }
     };
 
@@ -132,6 +164,9 @@ export default function Room() {
     socket.on('disconnect', handleDisconnect);
     socket.on('voting_status_changed', handleVotingStatus);
     socket.on('vote_success', handleVoteSuccess);
+    socket.on('vote_rejected', handleVoteRejected);
+    socket.on('my_votes', handleMyVotes);
+    socket.on('error', handleSocketError);
     socket.on('song_request_submitted', handleRequestSubmitted);
     socket.on('song_request_processed', handleRequestProcessed);
 
@@ -140,10 +175,13 @@ export default function Room() {
       socket.off('disconnect', handleDisconnect);
       socket.off('voting_status_changed', handleVotingStatus);
       socket.off('vote_success', handleVoteSuccess);
+      socket.off('vote_rejected', handleVoteRejected);
+      socket.off('my_votes', handleMyVotes);
+      socket.off('error', handleSocketError);
       socket.off('song_request_submitted', handleRequestSubmitted);
       socket.off('song_request_processed', handleRequestProcessed);
     };
-  }, []);
+  }, [toast]);
 
   // Load initial leaderboard
   useEffect(() => {
@@ -163,16 +201,21 @@ export default function Room() {
 
   // Handle vote
   const handleVote = (songId) => {
-    if (votedSongs.has(songId)) {
-      alert('You have already voted for this song!');
-      return;
-    }
-    
-    if (!votingOpen) {
-      alert('Voting is closed!');
+    if (votedSongs.has(songId) || pendingVotes.has(songId)) {
       return;
     }
 
+    if (!votingOpen) {
+      toast.info('Voting is closed');
+      return;
+    }
+
+    if (!socket.connected) {
+      toast.error('You are offline. Reconnecting...');
+      return;
+    }
+
+    setPendingVotes((prev) => new Set([...prev, songId]));
     socket.emit('vote_song', { roomId, songId, userId });
   };
 
@@ -340,6 +383,7 @@ export default function Room() {
               showVoteButton={votingOpen}
               isAdmin={false}
               votedSongs={votedSongs}
+              pendingVotes={pendingVotes}
               onSongSelect={handleSongSelect}
               activeSongId={selectedSongId}
             />

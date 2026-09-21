@@ -10,6 +10,7 @@ export default function SongCard({
   isAdmin = false,
   onRemove,
   votedSongs = new Set(),
+  isVotePending = false,
   onSelectSong,
   isActive = false
 }) {
@@ -81,6 +82,7 @@ export default function SongCard({
             </button>
           ) : (
             <VoteButton
+              disabled={isVotePending}
               onVote={(event) => {
                 event.stopPropagation();
                 onVote(song.songId);

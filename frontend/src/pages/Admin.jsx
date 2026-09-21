@@ -7,6 +7,7 @@ import QRJoin from '../components/QRJoin';
 import MusicPlayer from '../components/MusicPlayer';
 import { socket } from '../socket/socket';
 import { ArrowLeft, Search, Plus, Wifi, WifiOff, X, Play, Pause } from 'lucide-react';
+import { useToast } from '../components/Toast';
 
 export default function Admin() {
   const { roomId } = useParams();
@@ -20,8 +21,10 @@ export default function Admin() {
   const [error, setError] = useState('');
   const [connected, setConnected] = useState(socket.connected);
   const [votingOpen, setVotingOpen] = useState(true);
+  const [togglingVoting, setTogglingVoting] = useState(false);
   const [songRequests, setSongRequests] = useState([]);
   const adminName = location.state?.adminName || 'Admin';
+  const toast = useToast();
 
   // Handle leaderboard updates
   const handleLeaderboardUpdate = useCallback((leaderboard) => {
@@ -49,6 +52,7 @@ export default function Admin() {
   useEffect(() => {
     const handleVotingStatusChange = ({ isOpen }) => {
       setVotingOpen(isOpen);
+      setTogglingVoting(false);
     };
 
     const handleSongRequestsUpdated = (requests) => {
@@ -58,12 +62,19 @@ export default function Admin() {
     const handleSongRequestProcessed = (data) => {
       if (data?.status === 'approved') {
         setError('');
+        toast.success(`Approved${data.songTitle ? `: ${data.songTitle}` : ''}`);
       }
+    };
+
+    const handleSocketError = (data) => {
+      setTogglingVoting(false);
+      toast.error(data?.message || 'Something went wrong');
     };
 
     socket.on('voting_status_changed', handleVotingStatusChange);
     socket.on('song_requests_updated', handleSongRequestsUpdated);
     socket.on('song_request_processed', handleSongRequestProcessed);
+    socket.on('error', handleSocketError);
 
     socket.emit('get_song_requests', { roomId });
 
@@ -71,8 +82,9 @@ export default function Admin() {
       socket.off('voting_status_changed', handleVotingStatusChange);
       socket.off('song_requests_updated', handleSongRequestsUpdated);
       socket.off('song_request_processed', handleSongRequestProcessed);
+      socket.off('error', handleSocketError);
     };
-  }, [roomId]);
+  }, [roomId, toast]);
 
   // Load initial leaderboard
   useEffect(() => {
@@ -113,8 +125,6 @@ export default function Admin() {
 
   // Add song to room
   const handleAddSong = (song) => {
-    console.log('🎵 Adding song to room:', song.title);
-    console.log('Preview URL being sent:', song.previewUrl || 'NULL');
     socket.emit('add_song', {
       roomId,
       songData: song
@@ -131,10 +141,11 @@ export default function Admin() {
   };
 
   // Toggle voting status
+  // The button waits for the server's voting_status_changed broadcast instead of
+  // updating optimistically, so the admin view never disagrees with the server.
   const handleToggleVoting = () => {
-    const newStatus = !votingOpen;
-    socket.emit('toggle_voting', { roomId, isOpen: newStatus });
-    setVotingOpen(newStatus); // Optimistic update
+    setTogglingVoting(true);
+    socket.emit('toggle_voting', { roomId, isOpen: !votingOpen });
   };
 
   const handleApproveRequest = (requestId) => {
@@ -174,7 +185,8 @@ export default function Admin() {
         </div>
 
         <button 
-          onClick={handleToggleVoting} 
+          onClick={handleToggleVoting}
+          disabled={togglingVoting || !connected}
           className={`voting-toggle-btn ${votingOpen ? 'open' : 'closed'}`}
         >
           {votingOpen ? <Pause size={20} /> : <Play size={20} />}

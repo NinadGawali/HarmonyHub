@@ -9,6 +9,7 @@ export default function Leaderboard({
   isAdmin = false,
   onRemove,
   votedSongs,
+  pendingVotes,
   onSongSelect,
   activeSongId
 }) {
@@ -43,6 +44,7 @@ export default function Leaderboard({
             isAdmin={isAdmin}
             onRemove={onRemove}
             votedSongs={votedSongs}
+            isVotePending={pendingVotes?.has(song.songId) ?? false}
             onSelectSong={onSongSelect}
             isActive={activeSongId === song.songId}
           />
