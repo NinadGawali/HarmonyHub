@@ -1,21 +1,29 @@
 const redis = require('../config/redis');
 const { searchSongs, getTrackDetails } = require('./spotifyService');
 
+class VoteError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.name = 'VoteError';
+    this.code = code;
+  }
+}
+
 // Vote for a song (one vote per user per song)
 const voteSong = async (roomId, songId, userId) => {
   try {
-    // Check if user has already voted for this song
-    const voteKey = `votes:${roomId}:${songId}`;
-    const hasVoted = await redis.sIsMember(voteKey, userId);
-
-    if (hasVoted) {
-      throw new Error('You have already voted for this song');
+    // Reject votes for songs that are not in the room; ZINCRBY would otherwise re-add them.
+    const currentScore = await redis.zScore(`leaderboard:${roomId}`, songId);
+    if (currentScore === null) {
+      throw new VoteError('SONG_NOT_FOUND', 'This song is no longer in the room');
     }
 
-    // Add user to the set of voters for this song
-    await redis.sAdd(voteKey, userId);
+    // SADD returns 0 when the member already exists, which makes the duplicate check atomic.
+    const added = await redis.sAdd(`votes:${roomId}:${songId}`, userId);
+    if (!added) {
+      throw new VoteError('ALREADY_VOTED', 'You have already voted for this song');
+    }
 
-    // Increment vote count in sorted set
     await redis.zIncrBy(`leaderboard:${roomId}`, 1, songId);
 
     // Get updated leaderboard
@@ -23,9 +31,25 @@ const voteSong = async (roomId, songId, userId) => {
     
     return leaderboard;
   } catch (error) {
-    console.error('Error voting for song:', error);
+    if (!(error instanceof VoteError)) {
+      console.error('Error voting for song:', error);
+    }
     throw error;
   }
+};
+
+// Song ids in the room that the user has already voted for
+const getUserVotes = async (roomId, userId) => {
+  const songIds = await redis.zRange(`leaderboard:${roomId}`, 0, -1);
+  if (!songIds.length) {
+    return [];
+  }
+
+  const membership = await Promise.all(
+    songIds.map((songId) => redis.sIsMember(`votes:${roomId}:${songId}`, userId))
+  );
+
+  return songIds.filter((_, index) => membership[index]);
 };
 
 // Get leaderboard for a room
@@ -49,7 +73,6 @@ const getLeaderboard = async (roomId) => {
     const leaderboard = await Promise.all(
       results.map(async (item) => {
         const songData = await redis.hGetAll(`song:${item.value}`);
-        console.log(`📖 Retrieved from Redis - ${songData.title}: Preview URL = ${songData.previewUrl || 'NULL'}`);
         return {
           songId: item.value,
           votes: item.score,
@@ -74,8 +97,6 @@ const addSongToRoom = async (roomId, songData) => {
   try {
     const { songId, title, artist, image, spotifyUrl, previewUrl } = songData;
 
-    console.log(`📝 Storing in Redis - Preview URL: ${previewUrl || 'NULL'}`);
-    
     // Store song metadata
     await redis.hSet(`song:${songId}`, {
       title,
@@ -101,7 +122,11 @@ const addSongToRoom = async (roomId, songData) => {
 // Remove song from room
 const removeSongFromRoom = async (roomId, songId) => {
   try {
-    await redis.zRem(`leaderboard:${roomId}`, songId);
+    // Drop the voter set too, so a re-added song starts fresh instead of blocking earlier voters.
+    await Promise.all([
+      redis.zRem(`leaderboard:${roomId}`, songId),
+      redis.del(`votes:${roomId}:${songId}`)
+    ]);
     return true;
   } catch (error) {
     console.error('Error removing song from room:', error);
@@ -135,7 +160,8 @@ const setVotingStatus = async (roomId, isOpen) => {
 const getVotingStatus = async (roomId) => {
   try {
     const status = await redis.hGet(`room:${roomId}`, 'votingOpen');
-    return status === 'true';
+    // Voting is open unless explicitly closed; rooms created before this field existed have no value.
+    return status !== 'false';
   } catch (error) {
     console.error('Error getting voting status:', error);
     return true; // Default to open
@@ -247,6 +273,7 @@ const approveSongRequest = async (roomId, requestId) => {
 
     return {
       requestId,
+      requesterId: request.userId,
       songData
     };
   } catch (error) {
@@ -273,7 +300,10 @@ const rejectSongRequest = async (roomId, requestId) => {
 
     await redis.lRem(`songrequests:pending:${roomId}`, 0, requestId);
 
-    return true;
+    return {
+      requestId,
+      requesterId: request.userId
+    };
   } catch (error) {
     console.error('Error rejecting song request:', error);
     throw error;
@@ -281,7 +311,9 @@ const rejectSongRequest = async (roomId, requestId) => {
 };
 
 module.exports = {
+  VoteError,
   voteSong,
+  getUserVotes,
   getLeaderboard,
   addSongToRoom,
   removeSongFromRoom,

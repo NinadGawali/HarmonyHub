@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { roomAPI } from '../api/api';
+import { saveRoomIdentity } from '../utils/roomIdentity';
 import { Music2, Users, Plus, LogIn, Home } from 'lucide-react';
 
 export default function PartyRoom() {
@@ -50,10 +51,13 @@ export default function PartyRoom() {
     setLoading(true);
 
     try {
-      await roomAPI.join(roomCode.toUpperCase().trim(), userName.trim());
-      navigate(`/room/${roomCode.toUpperCase().trim()}`, {
-        state: { userName: userName.trim() }
+      const code = roomCode.toUpperCase().trim();
+      const response = await roomAPI.join(code, userName.trim());
+      const identity = saveRoomIdentity(code, {
+        userId: response.data.userId,
+        userName: response.data.userName
       });
+      navigate(`/room/${code}`, { state: identity });
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to join room');
     } finally {

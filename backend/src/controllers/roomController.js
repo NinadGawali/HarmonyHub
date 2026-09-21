@@ -16,7 +16,8 @@ const createRoom = async (req, res) => {
     await redis.hSet(`room:${roomId}`, {
       adminName: adminName.trim(),
       createdAt: new Date().toISOString(),
-      active: 'true'
+      active: 'true',
+      votingOpen: 'true'
     });
 
     // Set room expiry to 24 hours
