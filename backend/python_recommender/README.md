@@ -22,4 +22,3 @@ This service handles LangChain-based playlist recommendations.
 
 - GET /health
 - POST /recommend/ai
-- POST /recommend/location

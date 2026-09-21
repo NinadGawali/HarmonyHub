@@ -1,70 +1,61 @@
-import React, { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Music2, ArrowLeft, Play, Plus } from 'lucide-react';
-import { getStoredPlaylists } from '../utils/playlistStorage';
+import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Library, Plus, Trash2 } from 'lucide-react';
+import { deleteStoredPlaylist, getStoredPlaylists } from '../utils/playlistStorage';
+import { useToast } from '../components/Toast';
+import { ArtworkMosaic, Button, EmptyState } from '../components/ui';
+import styles from './PlaylistLibrary.module.css';
 
-const fallbackPoster = 'https://images.unsplash.com/photo-1511379938547-c1f69419868d?auto=format&fit=crop&w=900&q=80';
+const dateFormat = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 
 export default function PlaylistLibrary() {
-  const navigate = useNavigate();
-  const [playlists, setPlaylists] = useState([]);
+  const toast = useToast();
+  const [playlists, setPlaylists] = useState(getStoredPlaylists);
 
-  useEffect(() => {
-    setPlaylists(getStoredPlaylists());
-  }, []);
+  const remove = (playlist) => {
+    if (!window.confirm(`Delete "${playlist.name}"? This cannot be undone.`)) return;
+    setPlaylists(deleteStoredPlaylist(playlist.id));
+    toast.info(`Deleted "${playlist.name}"`);
+  };
 
   return (
-    <div className="discover-page playlist-library-page">
-      <header className="discover-nav">
-        <div className="brand-mark">
-          <Music2 size={24} />
-          <span>HarmonyHub</span>
+    <div className="container">
+      <header className={styles.header}>
+        <div>
+          <h1 className={styles.title}>Your library</h1>
+          <p className={styles.subtitle}>
+            {playlists.length ? `${playlists.length} ${playlists.length === 1 ? 'playlist' : 'playlists'}` : 'Playlists you create appear here.'}
+          </p>
         </div>
-        <nav>
-          <Link to="/">Home</Link>
-          <Link to="/create-playlist">Create Playlist</Link>
-          <Link to="/party-room">Party Room</Link>
-        </nav>
+        <Button to="/create" icon={Plus}>New playlist</Button>
       </header>
 
-      <section className="library-hero">
-        <button className="btn-secondary" onClick={() => navigate('/')}>
-          <ArrowLeft size={16} />
-          <span>Back</span>
-        </button>
-        <div>
-          <h1>My Playlists</h1>
-          <p>Open, play, and share each playlist separately.</p>
-        </div>
-      </section>
-
       {playlists.length === 0 ? (
-        <div className="empty-library-state">
-          <Plus size={28} />
-          <p>No playlists saved yet.</p>
-          <button className="btn-primary" onClick={() => navigate('/create-playlist')}>
-            Create your first playlist
-          </button>
-        </div>
+        <EmptyState
+          icon={Library}
+          title="No playlists yet"
+          description="Describe a vibe and let AI build your first one."
+          action={<Button to="/create" icon={Plus}>Create a playlist</Button>}
+        />
       ) : (
-        <div className="top-playlists-grid">
-          {playlists.map((playlist) => {
-            const poster = playlist.songs?.find((song) => song.image)?.image || fallbackPoster;
-            return (
-              <article key={playlist.id} className="top-playlist-card library-playlist-card">
-                <img src={poster} alt={playlist.name} loading="lazy" />
-                <div className="top-playlist-overlay">
-                  <h3>{playlist.name}</h3>
-                  <p>{playlist.songs.length} songs</p>
-                  <button className="library-open-btn" onClick={() => navigate(`/playlists/${playlist.id}`)}>
-                    <Play size={14} />
-                    <span>Open playlist</span>
-                  </button>
-                </div>
-              </article>
-            );
-          })}
-        </div>
+        <ul className={styles.grid}>
+          {playlists.map((playlist) => (
+            <li key={playlist.id} className={styles.card}>
+              <Link to={`/library/${playlist.id}`} className={styles.cardLink}>
+                <span className={styles.cover}>
+                  <ArtworkMosaic tracks={playlist.songs} seed={playlist.name} size={220} />
+                </span>
+                <span className={styles.name}>{playlist.name}</span>
+                <span className={styles.meta}>
+                  {playlist.songs.length} songs · {dateFormat.format(new Date(playlist.createdAt))}
+                </span>
+              </Link>
+              <button type="button" className={styles.delete} onClick={() => remove(playlist)} aria-label={`Delete ${playlist.name}`}>
+                <Trash2 size={16} />
+              </button>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

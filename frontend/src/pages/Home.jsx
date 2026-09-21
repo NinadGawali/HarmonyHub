@@ -1,125 +1,149 @@
-import React from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Music2, Sparkles, Headphones, Radio, Compass } from 'lucide-react';
-import UserMenu from '../components/UserMenu';
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { ArrowRight, ChevronUp, Library, PartyPopper, QrCode, Sparkles, Trophy, Vote } from 'lucide-react';
+import { Badge, Button, Card } from '../components/ui';
+import { useAuth } from '../auth/AuthProvider';
+import styles from './Home.module.css';
+
+const PREVIEW_SONGS = [
+  { title: 'Midnight City', artist: 'M83', votes: 14, hue: 18 },
+  { title: 'Blinding Lights', artist: 'The Weeknd', votes: 11, hue: 330 },
+  { title: 'Kesariya', artist: 'Arijit Singh', votes: 7, hue: 265 },
+  { title: 'Titi Me Preguntó', artist: 'Bad Bunny', votes: 4, hue: 190 }
+];
+
+const FEATURES = [
+  {
+    icon: PartyPopper,
+    title: 'Party rooms',
+    text: 'Start a room, put the QR code on screen, and let guests vote from their phones. No app or account needed.',
+    to: '/party',
+    cta: 'Start a party'
+  },
+  {
+    icon: Sparkles,
+    title: 'AI playlists',
+    text: 'Describe a mood, name an artist, and get a tracklist you can edit, save and play.',
+    to: '/create',
+    cta: 'Create a playlist'
+  },
+  {
+    icon: Library,
+    title: 'Your library',
+    text: 'Keep your playlists in one place and play them through Spotify in the browser.',
+    to: '/library',
+    cta: 'Open library'
+  }
+];
+
+const STEPS = [
+  { icon: PartyPopper, title: 'Host a room', text: 'Log in with Spotify and create a room in one click.' },
+  { icon: QrCode, title: 'Guests scan in', text: 'They join with just a name, straight from the QR code.' },
+  { icon: Vote, title: 'Everyone votes', text: 'The leaderboard updates live for everyone in the room.' },
+  { icon: Trophy, title: 'Top song plays', text: 'Party mode keeps playing the highest-voted song.' }
+];
+
+function LeaderboardPreview() {
+  const max = PREVIEW_SONGS[0].votes;
+  return (
+    <Card className={styles.preview} padding="md" aria-hidden="true">
+      <div className={styles.previewHeader}>
+        <span className={styles.previewTitle}>Room K7Q2XP</span>
+        <Badge tone="success" dot>Voting open</Badge>
+      </div>
+      <ol className={styles.previewList}>
+        {PREVIEW_SONGS.map((song, index) => (
+          <li key={song.title} className={styles.previewRow} style={{ '--delay': `${index * 90}ms` }}>
+            <span className={styles.previewRank}>{index + 1}</span>
+            <span
+              className={styles.previewArt}
+              style={{ background: `linear-gradient(135deg, hsl(${song.hue} 75% 55%), hsl(${song.hue + 50} 70% 30%))` }}
+            />
+            <span className={styles.previewText}>
+              <strong>{song.title}</strong>
+              <span>{song.artist}</span>
+              <span className={styles.previewMeter} style={{ '--share': `${(song.votes / max) * 100}%` }} />
+            </span>
+            <span className={styles.previewVotes}>{song.votes}</span>
+            <span className={styles.previewVote}><ChevronUp size={16} /></span>
+          </li>
+        ))}
+      </ol>
+    </Card>
+  );
+}
 
 export default function Home() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const [code, setCode] = useState('');
 
-  const featuredPlaylists = [
-    {
-      id: 'night-drive',
-      title: 'Night Drive Pulse',
-      curator: 'HarmonyHub Editorial',
-      poster:
-        'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=900&q=80'
-    },
-    {
-      id: 'indie-cafe',
-      title: 'Indie Cafe Stories',
-      curator: 'Top Creators',
-      poster:
-        'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?auto=format&fit=crop&w=900&q=80'
-    },
-    {
-      id: 'global-beats',
-      title: 'Global Beats Radar',
-      curator: 'Regional Trends',
-      poster:
-        'https://images.unsplash.com/photo-1458560871784-56d23406c091?auto=format&fit=crop&w=900&q=80'
-    },
-    {
-      id: 'sunset-party',
-      title: 'Sunset Party Anthems',
-      curator: 'Party Rooms',
-      poster:
-        'https://images.unsplash.com/photo-1429962714451-bb934ecdc4ec?auto=format&fit=crop&w=900&q=80'
-    }
-  ];
+  const joinRoom = (event) => {
+    event.preventDefault();
+    const roomCode = code.trim().toUpperCase();
+    if (roomCode) navigate(`/room/${roomCode}`);
+  };
 
   return (
-    <div className="discover-page">
-      <header className="discover-nav">
-        <div className="brand-mark">
-          <Music2 size={24} />
-          <span>HarmonyHub</span>
-        </div>
-        <nav>
-          <Link to="/">Home</Link>
-          <Link to="/create-playlist">Create Playlist</Link>
-          <Link to="/playlists">My Playlists</Link>
-          <Link to="/party-room">Party Room</Link>
-        </nav>
-        <UserMenu />
-      </header>
-
-      <section className="discover-hero">
-        <div className="room-ambient room-ambient-one"></div>
-        <div className="room-ambient room-ambient-two"></div>
-        <div className="discover-glow"></div>
-        <div className="discover-copy">
-          <h1>Build playlists like a streaming pro.</h1>
-          <p>
-            Describe your vibe, blend favorite artists, and let AI generate tracks for your next
-            playlist. Then jump into a party room and crowd-vote songs in real time.
+    <div className="container">
+      <section className={styles.hero}>
+        <div className={styles.heroCopy}>
+          <Badge tone="accent" icon={Vote}>Live music voting</Badge>
+          <h1 className={styles.headline}>
+            Let the room pick <span className={styles.accentText}>the next song.</span>
+          </h1>
+          <p className={styles.lede}>
+            HarmonyHub turns any party into a live leaderboard. Guests vote from their phones and the
+            top song plays next on Spotify.
           </p>
-          <div className="discover-actions">
-            <button className="btn-primary" onClick={() => navigate('/create-playlist')}>
-              <Sparkles size={18} />
-              <span>Create New Playlist</span>
-            </button>
-            <button className="btn-secondary" onClick={() => navigate('/playlists')}>
-              <Music2 size={18} />
-              <span>My Playlists</span>
-            </button>
-            <button className="btn-secondary" onClick={() => navigate('/party-room')}>
-              <Radio size={18} />
-              <span>Open Party Room</span>
-            </button>
+
+          <div className={styles.heroActions}>
+            <Button to="/party" size="lg" iconRight={ArrowRight}>Host a party</Button>
+            <form className={styles.joinForm} onSubmit={joinRoom}>
+              <label htmlFor="home-room-code" className="visually-hidden">Room code</label>
+              <input
+                id="home-room-code"
+                className={styles.joinInput}
+                placeholder="Room code"
+                value={code}
+                onChange={(event) => setCode(event.target.value.toUpperCase())}
+                maxLength={6}
+                autoCapitalize="characters"
+                autoComplete="off"
+              />
+              <Button type="submit" variant="secondary" disabled={!code.trim()}>Join</Button>
+            </form>
           </div>
+          {user && <p className={styles.greeting}>Welcome back, {user.displayName}.</p>}
         </div>
+
+        <LeaderboardPreview />
       </section>
 
-      <section className="top-playlists-section">
-        <div className="section-title-row">
-          <h2>Top Playlists</h2>
-          <span>Fresh posters from trending vibes</span>
-        </div>
+      <section className={styles.features} aria-label="What you can do">
+        {FEATURES.map(({ icon: Icon, title, text, to, cta }) => (
+          <Card key={title} as="article" interactive className={styles.feature}>
+            <span className={styles.featureIcon}><Icon size={22} aria-hidden="true" /></span>
+            <h2 className={styles.featureTitle}>{title}</h2>
+            <p className={styles.featureText}>{text}</p>
+            <Button to={to} variant="ghost" size="sm" iconRight={ArrowRight} className={styles.featureLink}>{cta}</Button>
+          </Card>
+        ))}
+      </section>
 
-        <div className="top-playlists-grid">
-          {featuredPlaylists.map((playlist) => (
-            <article key={playlist.id} className="top-playlist-card">
-              <img src={playlist.poster} alt={playlist.title} loading="lazy" />
-              <div className="top-playlist-overlay">
-                <h3>{playlist.title}</h3>
-                <p>{playlist.curator}</p>
-              </div>
-            </article>
+      <section className={styles.steps}>
+        <h2 className={styles.sectionTitle}>How a party works</h2>
+        <ol className={styles.stepList}>
+          {STEPS.map(({ icon: Icon, title, text }, index) => (
+            <li key={title} className={styles.step}>
+              <span className={styles.stepNumber}>{String(index + 1).padStart(2, '0')}</span>
+              <Icon size={22} className={styles.stepIcon} aria-hidden="true" />
+              <h3>{title}</h3>
+              <p>{text}</p>
+            </li>
           ))}
-        </div>
+        </ol>
       </section>
-
-      <section className="discover-features">
-        <article>
-          <Headphones size={20} />
-          <h3>Curate With AI</h3>
-          <p>Type a mood + artist and generate a tracklist you can instantly save.</p>
-        </article>
-        <article>
-          <Compass size={20} />
-          <h3>Regional Picks</h3>
-          <p>Get an extra playlist with song suggestions influenced by your location.</p>
-        </article>
-        <article>
-          <Radio size={20} />
-          <h3>Live Party Rooms</h3>
-          <p>Create or join rooms to vote tracks and run your party queue collaboratively.</p>
-        </article>
-      </section>
-
-      <footer className="discover-footer">
-        <p>Built for social playlists, smart recommendations, and party voting.</p>
-      </footer>
     </div>
   );
 }

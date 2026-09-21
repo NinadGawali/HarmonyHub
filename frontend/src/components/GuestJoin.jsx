@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { LogIn, Music2 } from 'lucide-react';
+import { LogIn } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
+import { Button, Card, TextInput } from './ui';
+import BrandMark from './layout/BrandMark';
+import styles from '../pages/AuthScreen.module.css';
 
 // Shown when someone opens a room link without a session: join as a guest or with Spotify.
 export default function GuestJoin({ roomId }) {
-  const navigate = useNavigate();
   const { joinAsGuest, loginWithSpotify } = useAuth();
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -14,7 +15,7 @@ export default function GuestJoin({ roomId }) {
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (!name.trim()) {
-      setError('Please enter your name');
+      setError('Enter your name so others know who voted.');
       return;
     }
 
@@ -29,43 +30,36 @@ export default function GuestJoin({ roomId }) {
   };
 
   return (
-    <div className="home-page">
-      <div className="home-container guest-join">
-        <div className="home-header">
-          <Music2 size={56} className="logo" />
-          <h1>Join room {roomId}</h1>
-          <p>Pick a name to start voting. No account needed.</p>
-        </div>
+    <div className={styles.screen}>
+      <Card padding="lg" className={styles.card}>
+        <BrandMark compact />
+        <h1 className={styles.title}>
+          Join room <span className={styles.code}>{roomId}</span>
+        </h1>
+        <p className={styles.text}>Pick a name and start voting. No account needed.</p>
 
-        <div className="home-card">
-          <form onSubmit={handleSubmit} className="home-form">
-            <input
-              type="text"
-              placeholder="Your name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              maxLength={40}
-              disabled={busy}
-              autoComplete="nickname"
-              autoFocus
-            />
-            <button type="submit" className="btn-primary" disabled={busy}>
-              <LogIn size={20} />
-              <span>{busy ? 'Joining...' : 'Join as guest'}</span>
-            </button>
-          </form>
+        <form className={styles.form} onSubmit={handleSubmit} noValidate>
+          <TextInput
+            label="Your name"
+            hideLabel
+            placeholder="Your name"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            maxLength={40}
+            autoComplete="nickname"
+            autoFocus
+            disabled={busy}
+            error={error}
+          />
+          <Button type="submit" size="lg" fullWidth icon={LogIn} loading={busy}>Join as guest</Button>
+        </form>
 
-          <div className="guest-join-divider"><span>or</span></div>
+        <div className={styles.divider}>or</div>
 
-          <button className="btn-secondary btn-spotify" onClick={() => loginWithSpotify(`/room/${roomId}`)} disabled={busy}>
-            Continue with Spotify
-          </button>
-        </div>
-
-        {error && <div className="error-message" role="alert">{error}</div>}
-
-        <button className="btn-link" onClick={() => navigate('/')}>Back to Home</button>
-      </div>
+        <Button variant="spotify" fullWidth onClick={() => loginWithSpotify(`/room/${roomId}`)} disabled={busy}>
+          Continue with Spotify
+        </Button>
+      </Card>
     </div>
   );
 }

@@ -29,8 +29,10 @@ describe('authentication and authorization', () => {
   });
 
   describe('sessions', () => {
-    it('returns 401 from /me without a session', async () => {
-      assert.equal((await request('GET', '/api/auth/me')).status, 401);
+    it('returns no user from /me without a session', async () => {
+      const response = await request('GET', '/api/auth/me');
+      assert.equal(response.status, 200);
+      assert.equal(response.body.user, null);
     });
 
     it('creates a guest session with an httpOnly cookie', async () => {
@@ -55,7 +57,7 @@ describe('authentication and authorization', () => {
       const session = await createGuestSession('Temp');
       fixtures.trackUser(session.user.id);
       assert.equal((await request('POST', '/api/auth/logout', { cookie: session.cookie })).status, 204);
-      assert.equal((await request('GET', '/api/auth/me', { cookie: session.cookie })).status, 401);
+      assert.equal((await request('GET', '/api/auth/me', { cookie: session.cookie })).body.user, null);
     });
   });
 
@@ -104,6 +106,14 @@ describe('authentication and authorization', () => {
       assert.equal(asHost.body.isHost, true);
       assert.equal(asGuest.body.isHost, false);
       assert.equal(asHost.body.hostUserId, undefined, 'host id is not exposed');
+    });
+
+    it('guards and validates AI playlist generation; location endpoints are gone', async () => {
+      const body = { description: 'chill' };
+      assert.equal((await request('POST', '/api/playlists/recommendations', { cookie: guest.cookie, body })).status, 401);
+      assert.equal((await request('POST', '/api/playlists/recommendations', { cookie: host.cookie, body: { description: '  ' } })).status, 400);
+      assert.equal((await request('POST', '/api/playlists/recommendations/location', { cookie: host.cookie, body })).status, 404);
+      assert.equal((await request('GET', '/api/location/latest', { cookie: host.cookie })).status, 404);
     });
 
     it('only lets the host delete a room', async () => {
@@ -173,26 +183,6 @@ describe('authentication and authorization', () => {
       requester.close();
       intruder.close();
       await request('DELETE', `/api/rooms/${otherRoomId}`, { cookie: otherHost.cookie });
-    });
-  });
-
-  describe('location', () => {
-    it('stores location per user instead of globally', async () => {
-      const other = await createGuestSession('Bo');
-      fixtures.trackUser(other.user.id);
-
-      await request('POST', '/api/location', { cookie: guest.cookie, body: { latitude: 19.07, longitude: 72.87, state: 'Maharashtra' } });
-      await request('POST', '/api/location', { cookie: other.cookie, body: { latitude: 12.97, longitude: 77.59, state: 'Karnataka' } });
-
-      const mine = await request('GET', '/api/location/latest', { cookie: guest.cookie });
-      const theirs = await request('GET', '/api/location/latest', { cookie: other.cookie });
-      assert.equal(mine.body.location.state, 'Maharashtra');
-      assert.equal(theirs.body.location.state, 'Karnataka');
-    });
-
-    it('rejects invalid coordinates', async () => {
-      const response = await request('POST', '/api/location', { cookie: guest.cookie, body: { latitude: 200, longitude: 0 } });
-      assert.equal(response.status, 400);
     });
   });
 });

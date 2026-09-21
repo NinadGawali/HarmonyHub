@@ -26,30 +26,14 @@ export const roomAPI = {
   delete: (roomId) => api.delete(`/rooms/${roomId}`),
 };
 
-// Song APIs
-export const songAPI = {
-  getLeaderboard: (roomId) => api.get(`/rooms/${roomId}/leaderboard`),
-  addSong: (roomId, songData) => api.post(`/rooms/${roomId}/songs`, songData),
-  removeSong: (roomId, songId) => api.delete(`/rooms/${roomId}/songs/${songId}`),
-};
-
 // Spotify APIs
 export const spotifyAPI = {
   search: (query) => api.get('/spotify/search', { params: { q: query } }),
-  getTrack: (trackId) => api.get(`/spotify/track/${trackId}`),
-};
-
-// Location APIs
-export const locationAPI = {
-  send: (locationData) => api.post('/location', locationData),
-  getLatest: () => api.get('/location/latest'),
 };
 
 // Playlist APIs
 export const playlistAPI = {
   generateRecommendations: (payload) => api.post('/playlists/recommendations', payload),
-  generateAIRecommendations: (payload) => api.post('/playlists/recommendations/ai', payload),
-  generateLocationRecommendations: (payload) => api.post('/playlists/recommendations/location', payload),
 };
 
 export default api;

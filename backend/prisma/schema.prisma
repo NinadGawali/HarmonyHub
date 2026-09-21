@@ -47,7 +47,6 @@ model User {
   votes        Vote[]
   songRequests SongRequest[]
   playlists    Playlist[]
-  location     UserLocation?
 
   @@map("users")
 }
@@ -194,18 +193,4 @@ model PlaylistTrack {
 
   @@id([playlistId, position])
   @@map("playlist_tracks")
-}
-
-model UserLocation {
-  userId    String   @id @map("user_id") @db.Uuid
-  state     String?
-  city      String?
-  latitude  Float
-  longitude Float
-  accuracy  Float?
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@map("user_locations")
 }

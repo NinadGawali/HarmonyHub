@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
+import styles from './Toast.module.css';
 
 const ToastContext = createContext(null);
 
@@ -49,14 +50,14 @@ export function ToastProvider({ children }) {
   return (
     <ToastContext.Provider value={api}>
       {children}
-      <div className="toast-stack" role="status" aria-live="polite">
+      <div className={styles.stack} role="status" aria-live="polite">
         {toasts.map(({ id, message, type }) => {
           const Icon = ICONS[type] || Info;
           return (
-            <div key={id} className={`toast toast-${type}`}>
-              <Icon size={18} className="toast-icon" />
-              <span className="toast-message">{message}</span>
-              <button className="toast-close" onClick={() => dismiss(id)} aria-label="Dismiss notification">
+            <div key={id} className={`${styles.toast} ${styles[type]}`}>
+              <Icon size={18} className={styles.icon} />
+              <span className={styles.message}>{message}</span>
+              <button type="button" className={styles.close} onClick={() => dismiss(id)} aria-label="Dismiss notification">
                 <X size={16} />
               </button>
             </div>

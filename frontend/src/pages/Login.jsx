@@ -1,13 +1,15 @@
 import React from 'react';
-import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
-import { Music2, Home } from 'lucide-react';
+import { Link, Navigate, useSearchParams } from 'react-router-dom';
+import { AlertCircle } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
+import { Button, Card } from '../components/ui';
+import BrandMark from '../components/layout/BrandMark';
+import styles from './AuthScreen.module.css';
 
 const safeReturnTo = (value) => (value && value.startsWith('/') && !value.startsWith('//') ? value : '/');
 
 export default function Login() {
   const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
   const { loading, isSpotifyUser, user, loginWithSpotify } = useAuth();
 
   const returnTo = safeReturnTo(searchParams.get('returnTo'));
@@ -18,40 +20,32 @@ export default function Login() {
   }
 
   return (
-    <div className="home-page login-page">
-      <div className="home-container login-container">
-        <div className="party-room-topbar">
-          <button className="btn-secondary" onClick={() => navigate('/')}>
-            <Home size={18} />
-            <span>Back to Home</span>
-          </button>
-        </div>
+    <div className={styles.screen}>
+      <Card padding="lg" className={styles.card}>
+        <BrandMark compact />
+        <h1 className={styles.title}>Log in with Spotify</h1>
+        <p className={styles.text}>Hosting parties and building playlists use your Spotify account.</p>
 
-        <div className="home-header">
-          <Music2 size={64} className="logo" />
-          <h1>Log in to HarmonyHub</h1>
-          <p>Hosting parties and building playlists uses your Spotify account.</p>
-        </div>
-
-        <div className="home-card login-card">
-          {user?.isGuest && (
-            <p className="login-note">
-              You are currently joined as guest <strong>{user.displayName}</strong>.
-            </p>
-          )}
-
-          <button className="btn-primary btn-spotify" onClick={() => loginWithSpotify(returnTo)} disabled={loading}>
-            Continue with Spotify
-          </button>
-
-          <p className="login-note">
-            Just joining a party? You don&apos;t need an account. Open the room link or enter the
-            code on the <Link to="/party-room">Party Room</Link> page.
+        {error && (
+          <p className={styles.alert} role="alert">
+            <AlertCircle size={18} aria-hidden="true" />
+            <span>{error}</span>
           </p>
-        </div>
+        )}
 
-        {error && <div className="error-message" role="alert">{error}</div>}
-      </div>
+        {user?.isGuest && (
+          <p className={styles.note}>You are currently joined as guest <strong>{user.displayName}</strong>.</p>
+        )}
+
+        <Button variant="spotify" size="lg" fullWidth onClick={() => loginWithSpotify(returnTo)} disabled={loading}>
+          Continue with Spotify
+        </Button>
+
+        <p className={styles.note}>
+          Just joining a party? You don&apos;t need an account. Open the room link or enter the code on the{' '}
+          <Link to="/party" className={styles.link}>Party</Link> page.
+        </p>
+      </Card>
     </div>
   );
 }

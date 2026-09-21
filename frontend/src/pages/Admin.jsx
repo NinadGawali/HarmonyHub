@@ -1,367 +1,183 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Link, useParams, useNavigate } from 'react-router-dom';
-import { roomAPI, songAPI, spotifyAPI } from '../api/api';
-import useSocket from '../hooks/useSocket';
+import React, { useEffect, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import { Check, Inbox, ListMusic, Lock, LockOpen, QrCode, Search, Trophy, X } from 'lucide-react';
+import { roomAPI } from '../api/api';
+import useRoomSocket from '../hooks/useRoomSocket';
+import usePlayback from '../hooks/usePlayback';
 import Leaderboard from '../components/Leaderboard';
-import QRJoin from '../components/QRJoin';
-import MusicPlayer from '../components/MusicPlayer';
-import { socket } from '../socket/socket';
-import { ArrowLeft, Search, Plus, Wifi, WifiOff, X, Play, Pause } from 'lucide-react';
-import { useToast } from '../components/Toast';
-import { useAuth } from '../auth/AuthProvider';
+import PlayerBar from '../components/PlayerBar';
+import ShareRoom from '../components/ShareRoom';
+import SpotifySearch from '../components/SpotifySearch';
+import RoomError from '../components/RoomError';
+import PartyHeader from '../components/layout/PartyHeader';
+import { Button, Card, CardHeader, EmptyState, Modal, PageSpinner, TabPanel, Tabs } from '../components/ui';
+import styles from './Admin.module.css';
 
-export default function Admin() {
-  const { roomId } = useParams();
-  const navigate = useNavigate();
-  const [songs, setSongs] = useState([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [searching, setSearching] = useState(false);
-  const [error, setError] = useState('');
-  const [connected, setConnected] = useState(socket.connected);
-  const [votingOpen, setVotingOpen] = useState(true);
-  const [togglingVoting, setTogglingVoting] = useState(false);
-  const [songRequests, setSongRequests] = useState([]);
-  const [isHost, setIsHost] = useState(false);
-  const { user } = useAuth();
-  const toast = useToast();
+const TAB_PREFIX = 'admin';
 
-  // Handle leaderboard updates
-  const handleLeaderboardUpdate = useCallback((leaderboard) => {
-    setSongs(leaderboard);
-  }, []);
+function Stat({ label, value }) {
+  return (
+    <div className={styles.stat}>
+      <span className={styles.statValue}>{value}</span>
+      <span className={styles.statLabel}>{label}</span>
+    </div>
+  );
+}
 
-  // Connect only once the server confirmed this user hosts the room.
-  useSocket(roomId, handleLeaderboardUpdate, isHost);
-
-  // Monitor connection status
-  useEffect(() => {
-    const handleConnect = () => setConnected(true);
-    const handleDisconnect = () => setConnected(false);
-
-    socket.on('connect', handleConnect);
-    socket.on('disconnect', handleDisconnect);
-
-    return () => {
-      socket.off('connect', handleConnect);
-      socket.off('disconnect', handleDisconnect);
-    };
-  }, []);
-
-  // Listen for voting status changes
-  useEffect(() => {
-    const handleVotingStatusChange = ({ isOpen }) => {
-      setVotingOpen(isOpen);
-      setTogglingVoting(false);
-    };
-
-    const handleSongRequestsUpdated = (requests) => {
-      setSongRequests(Array.isArray(requests) ? requests : []);
-    };
-
-    const handleSongRequestProcessed = (data) => {
-      if (data?.status === 'approved') {
-        setError('');
-        toast.success(`Approved${data.songTitle ? `: ${data.songTitle}` : ''}`);
-      }
-    };
-
-    const handleSocketError = (data) => {
-      setTogglingVoting(false);
-      if (data?.event === 'join_room') {
-        setError(data.message || 'Failed to join room');
-        return;
-      }
-      toast.error(data?.message || 'Something went wrong');
-    };
-
-    socket.on('voting_status_changed', handleVotingStatusChange);
-    socket.on('song_requests_updated', handleSongRequestsUpdated);
-    socket.on('song_request_processed', handleSongRequestProcessed);
-    socket.on('error', handleSocketError);
-
-    return () => {
-      socket.off('voting_status_changed', handleVotingStatusChange);
-      socket.off('song_requests_updated', handleSongRequestsUpdated);
-      socket.off('song_request_processed', handleSongRequestProcessed);
-      socket.off('error', handleSocketError);
-    };
-  }, [roomId, toast]);
-
-  // Confirm host access, then load the initial state
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadRoom = async () => {
-      try {
-        const { data: room } = await roomAPI.get(roomId);
-        if (cancelled) return;
-
-        setVotingOpen(room.votingOpen);
-        if (!room.isHost) {
-          setError('Only the host can manage this room.');
-          return;
-        }
-
-        const response = await songAPI.getLeaderboard(roomId);
-        if (!cancelled) {
-          setSongs(response.data.leaderboard);
-          setIsHost(true);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err.response?.status === 404
-            ? 'This room does not exist or has expired.'
-            : err.response?.data?.error || 'Failed to load the room');
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    };
-
-    loadRoom();
-    return () => {
-      cancelled = true;
-    };
-  }, [roomId]);
-
-  // Search Spotify
-  const handleSearch = async (e) => {
-    e.preventDefault();
-    
-    if (!searchQuery.trim()) {
-      return;
-    }
-
-    setSearching(true);
-    setError('');
-
-    try {
-      const response = await spotifyAPI.search(searchQuery);
-      setSearchResults(response.data.songs);
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to search songs');
-    } finally {
-      setSearching(false);
-    }
-  };
-
-  // Add song to room
-  const handleAddSong = (song) => {
-    socket.emit('add_song', {
-      roomId,
-      songData: song
-    });
-    
-    // Clear search
-    setSearchQuery('');
-    setSearchResults([]);
-  };
-
-  // Remove song from room
-  const handleRemoveSong = (songId) => {
-    socket.emit('remove_song', { roomId, songId });
-  };
-
-  // Toggle voting status
-  // The button waits for the server's voting_status_changed broadcast instead of
-  // updating optimistically, so the admin view never disagrees with the server.
-  const handleToggleVoting = () => {
-    setTogglingVoting(true);
-    socket.emit('toggle_voting', { roomId, isOpen: !votingOpen });
-  };
-
-  const handleApproveRequest = (requestId) => {
-    socket.emit('approve_song_request', { roomId, requestId });
-  };
-
-  const handleRejectRequest = (requestId) => {
-    socket.emit('reject_song_request', { roomId, requestId });
-  };
-
-  if (loading) {
-    return (
-      <div className="loading-container">
-        <div className="spinner"></div>
-        <p>Loading admin panel...</p>
-      </div>
-    );
-  }
-
-  if (!isHost) {
-    return (
-      <div className="error-container">
-        <h2>Can&apos;t open the admin panel</h2>
-        <p>{error || 'Only the host can manage this room.'}</p>
-        <Link to={`/room/${roomId}`} className="btn-primary">Open as guest</Link>
-        <button onClick={() => navigate('/')} className="btn-secondary">Back to Home</button>
-      </div>
-    );
+function RequestList({ requests, onApprove, onReject }) {
+  if (!requests.length) {
+    return <EmptyState compact icon={Inbox} title="No requests" description="Guest requests show up here." />;
   }
 
   return (
-    <div className="admin-page">
-      <header className="admin-header">
-        <button onClick={() => navigate('/')} className="back-button">
-          <ArrowLeft size={20} />
-        </button>
-        
-        <div className="admin-info">
-          <h1>Admin Panel</h1>
-          <div className="admin-meta">
-            <span className="admin-badge">{user?.displayName}</span>
-            <span className="room-code-badge">Room: {roomId}</span>
-            <span className={`status-badge ${connected ? 'connected' : 'disconnected'}`}>
-              {connected ? <Wifi size={16} /> : <WifiOff size={16} />}
-              {connected ? 'Live' : 'Offline'}
-            </span>
+    <ul className={styles.requests}>
+      {requests.map((request) => (
+        <li key={request.requestId} className={styles.request}>
+          <div className={styles.requestText}>
+            <p className={styles.requestQuery}>{request.query}</p>
+            <p className={styles.requestBy}>from {request.userName || 'Guest'}</p>
           </div>
+          <div className={styles.requestActions}>
+            <Button size="sm" iconOnly variant="secondary" icon={X} onClick={() => onReject(request.requestId)} aria-label={`Decline ${request.query}`} />
+            <Button size="sm" icon={Check} onClick={() => onApprove(request.requestId)}>Add</Button>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function AdminView({ roomId, room }) {
+  const [tab, setTab] = useState('search');
+  const [shareOpen, setShareOpen] = useState(false);
+  const playback = usePlayback({
+    songs: room.songs,
+    playerName: `HarmonyHub party · ${roomId}`,
+    returnPath: `/admin/${roomId}`,
+    mode: 'votes'
+  });
+
+  const inRoom = new Set(room.songs.map((song) => song.songId));
+  const totalVotes = room.songs.reduce((sum, song) => sum + (song.votes || 0), 0);
+
+  return (
+    <div className={styles.page}>
+      <PartyHeader
+        roomId={roomId}
+        role="Hosting"
+        connected={room.connected}
+        votingOpen={room.votingOpen}
+        actions={(
+          <>
+            <Button variant="secondary" size="sm" icon={QrCode} onClick={() => setShareOpen(true)}>Invite</Button>
+            <Button
+              variant={room.votingOpen ? 'secondary' : 'primary'}
+              size="sm"
+              icon={room.votingOpen ? Lock : LockOpen}
+              onClick={room.toggleVoting}
+              loading={room.togglingVoting}
+              disabled={!room.connected}
+            >
+              {room.votingOpen ? 'Close voting' : 'Open voting'}
+            </Button>
+          </>
+        )}
+      />
+
+      <main className={`container ${styles.main}`}>
+        <section className={styles.stats} aria-label="Room stats">
+          <Stat label="Songs" value={room.songs.length} />
+          <Stat label="Votes" value={totalVotes} />
+          <Stat label="Requests" value={room.requests.length} />
+        </section>
+
+        <div className={styles.grid}>
+          <Card padding="sm" className={styles.board}>
+            <div className={styles.boardHeader}>
+              <CardHeader
+                icon={Trophy}
+                title={room.votingOpen ? 'Live rankings' : 'Final rankings'}
+                subtitle="Tap a song to play it now. Party mode plays the top-voted song next."
+              />
+            </div>
+            <Leaderboard
+              songs={room.songs}
+              currentId={playback.currentId}
+              onRemove={room.removeSong}
+              onSelect={(song) => playback.play(song.songId)}
+              emptyAction={<Button variant="secondary" size="sm" icon={QrCode} onClick={() => setShareOpen(true)}>Invite guests</Button>}
+            />
+          </Card>
+
+          <Card className={styles.sidebar}>
+            <Tabs
+              idPrefix={TAB_PREFIX}
+              label="Queue tools"
+              active={tab}
+              onChange={setTab}
+              tabs={[
+                { id: 'search', label: 'Add songs', icon: Search },
+                { id: 'requests', label: 'Requests', icon: ListMusic, badge: room.requests.length || null }
+              ]}
+            />
+            <div className={styles.panel}>
+              {tab === 'search' ? (
+                <TabPanel id="search" idPrefix={TAB_PREFIX}>
+                  <SpotifySearch onAdd={room.addSong} isAdded={(songId) => inRoom.has(songId)} />
+                </TabPanel>
+              ) : (
+                <TabPanel id="requests" idPrefix={TAB_PREFIX}>
+                  <RequestList requests={room.requests} onApprove={room.approveRequest} onReject={room.rejectRequest} />
+                </TabPanel>
+              )}
+            </div>
+          </Card>
         </div>
 
-        <button 
-          onClick={handleToggleVoting}
-          disabled={togglingVoting || !connected}
-          className={`voting-toggle-btn ${votingOpen ? 'open' : 'closed'}`}
-        >
-          {votingOpen ? <Pause size={20} /> : <Play size={20} />}
-          {votingOpen ? 'Close Voting' : 'Open Voting'}
-        </button>
-      </header>
+        <PlayerBar playback={playback} label="Party mode: top-voted plays next" />
+      </main>
 
-      <div className="admin-content">
-        {/* Left Panel - Search & QR */}
-        <aside className="admin-sidebar">
-          {/* QR Code */}
-          <QRJoin roomId={roomId} />
-
-          {/* Search Section */}
-          <div className="search-section">
-            <h3>Add Songs</h3>
-            
-            <form onSubmit={handleSearch} className="search-form">
-              <div className="search-input-group">
-                <Search size={20} />
-                <input
-                  type="text"
-                  placeholder="Search songs on Spotify..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  disabled={searching}
-                />
-                {searchQuery && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSearchQuery('');
-                      setSearchResults([]);
-                    }}
-                    className="clear-button"
-                  >
-                    <X size={16} />
-                  </button>
-                )}
-              </div>
-              <button type="submit" disabled={searching} className="btn-search">
-                {searching ? 'Searching...' : 'Search'}
-              </button>
-            </form>
-
-            {/* Search Results */}
-            {searchResults.length > 0 && (
-              <div className="search-results">
-                <h4>Search Results</h4>
-                {searchResults.map((song) => (
-                  <div key={song.songId} className="search-result-item">
-                    {song.image && (
-                      <img src={song.image} alt={song.title} className="result-image" />
-                    )}
-                    <div className="result-info">
-                      <p className="result-title">{song.title}</p>
-                      <p className="result-artist">{song.artist}</p>
-                    </div>
-                    <button
-                      onClick={() => handleAddSong(song)}
-                      className="btn-add"
-                    >
-                      <Plus size={16} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="request-section">
-            <h3>Song Requests</h3>
-            {songRequests.length === 0 ? (
-              <p className="request-empty">No pending requests</p>
-            ) : (
-              <div className="request-list">
-                {songRequests.map((request) => (
-                  <div key={request.requestId} className="request-item">
-                    <div className="request-text">
-                      <p className="request-query">{request.query}</p>
-                      <p className="request-meta">Requested by {request.userName || 'Guest'}</p>
-                    </div>
-                    <div className="request-actions">
-                      <button
-                        className="request-approve"
-                        onClick={() => handleApproveRequest(request.requestId)}
-                      >
-                        Approve
-                      </button>
-                      <button
-                        className="request-reject"
-                        onClick={() => handleRejectRequest(request.requestId)}
-                      >
-                        Reject
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {error && (
-            <div className="error-message">
-              {error}
-            </div>
-          )}
-        </aside>
-
-        {/* Right Panel - Leaderboard */}
-        <main className="admin-main">
-          {songs.length > 0 && (
-            <div className="music-player-section">
-              <h2 className="player-heading">
-                {votingOpen ? '🎵 Queue Preview' : '🎵 Now Playing Winners'}
-              </h2>
-              <p className="player-subtext">
-                {votingOpen
-                  ? 'Playback controls are available. Auto-play starts when voting is closed.'
-                  : 'Auto-playing songs by rank. Use Previous/Next to navigate the queue.'}
-              </p>
-              <MusicPlayer songs={songs} autoPlay={!votingOpen} />
-            </div>
-          )}
-
-          <div className="leaderboard-section">
-            <h2 className="section-heading">
-              {votingOpen ? '🔥 Current Rankings' : '🏆 Final Results'}
-            </h2>
-            <Leaderboard
-              songs={songs}
-              showVoteButton={false}
-              isAdmin={true}
-              onRemove={handleRemoveSong}
-            />
-          </div>
-        </main>
-      </div>
+      <Modal open={shareOpen} onClose={() => setShareOpen(false)} title="Invite guests">
+        <ShareRoom roomId={roomId} />
+      </Modal>
     </div>
   );
+}
+
+export default function Admin() {
+  const { roomId } = useParams();
+  const [status, setStatus] = useState('loading');
+  const [error, setError] = useState('');
+
+  // Only the host may open the admin panel; the server is the source of truth.
+  useEffect(() => {
+    let cancelled = false;
+    roomAPI.get(roomId)
+      .then(({ data }) => {
+        if (cancelled) return;
+        if (data.isHost) {
+          setStatus('ready');
+        } else {
+          setError('Only the host can manage this room.');
+          setStatus('forbidden');
+        }
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err.response?.status === 404 ? 'This room does not exist or has ended.' : 'Could not load the room.');
+        setStatus('error');
+      });
+    return () => { cancelled = true; };
+  }, [roomId]);
+
+  const room = useRoomSocket({ roomId, enabled: status === 'ready' });
+
+  if (status === 'loading') return <PageSpinner label="Loading room" />;
+  if (status === 'forbidden') {
+    return <RoomError message={error} action={<Button to={`/room/${roomId}`}>Open as guest</Button>} />;
+  }
+  if (status === 'error' || room.joinError) return <RoomError message={error || room.joinError} />;
+  if (!room.loaded) return <PageSpinner label="Connecting" />;
+
+  return <AdminView roomId={roomId} room={room} />;
 }

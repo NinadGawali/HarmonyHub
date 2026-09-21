@@ -1,10 +1,12 @@
+// Playlists are kept in this browser until they move to the server in a later phase.
 const PLAYLIST_STORAGE_KEY = 'harmonyhub.playlists';
 
 export const getStoredPlaylists = () => {
   try {
     const raw = localStorage.getItem(PLAYLIST_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch (_error) {
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
     return [];
   }
 };
@@ -21,4 +23,9 @@ export const createPlaylistRecord = ({ name, songs }) => ({
   songs
 });
 
-export const getPlaylistUrl = (playlistId) => `${window.location.origin}/playlists/${playlistId}`;
+export const addStoredPlaylist = (playlist) => saveStoredPlaylists([playlist, ...getStoredPlaylists()]);
+
+export const deleteStoredPlaylist = (playlistId) =>
+  saveStoredPlaylists(getStoredPlaylists().filter((playlist) => playlist.id !== playlistId));
+
+export const getPlaylistUrl = (playlistId) => `${window.location.origin}/library/${playlistId}`;

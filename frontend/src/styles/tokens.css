@@ -1,0 +1,98 @@
+/* HarmonyHub design tokens. Components read these; nothing else hard-codes colors or sizes. */
+:root {
+  color-scheme: dark;
+
+  /* Surfaces: ink with a violet undertone */
+  --color-bg: #0b0a10;
+  --color-bg-raised: #111019;
+  --color-surface: #16151f;
+  --color-surface-2: #1e1c29;
+  --color-surface-3: #282536;
+  --color-border: #2b2838;
+  --color-border-strong: #3d394e;
+
+  /* Text */
+  --color-text: #f4f2fa;
+  --color-text-muted: #a9a4bb;
+  --color-text-faint: #736e86;
+
+  /* Brand: warm coral for actions, lilac for highlights */
+  --color-accent: #ff6b3d;
+  --color-accent-hover: #ff825a;
+  --color-accent-soft: rgba(255, 107, 61, 0.14);
+  --color-accent-contrast: #140905;
+  --color-highlight: #b8a4ff;
+  --color-highlight-soft: rgba(184, 164, 255, 0.14);
+
+  /* Status */
+  --color-success: #3ddc97;
+  --color-success-soft: rgba(61, 220, 151, 0.14);
+  --color-warning: #ffc048;
+  --color-warning-soft: rgba(255, 192, 72, 0.14);
+  --color-danger: #ff5470;
+  --color-danger-soft: rgba(255, 84, 112, 0.14);
+
+  /* Spotify's own green is reserved for "Continue with Spotify" actions */
+  --color-spotify: #1ed760;
+  --color-spotify-hover: #3be477;
+
+  /* Podium */
+  --color-gold: #ffd166;
+  --color-silver: #d4d8e3;
+  --color-bronze: #e0a07a;
+
+  /* Typography */
+  --font-display: 'Space Grotesk Variable', 'Segoe UI', system-ui, sans-serif;
+  --font-body: 'Inter Variable', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+  --text-3xl: clamp(2rem, 4vw, 2.75rem);
+  --text-hero: clamp(2.5rem, 7vw, 4.75rem);
+
+  /* Spacing (4px grid) */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  /* Shape and depth */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 26px;
+  --radius-full: 999px;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.5);
+  --focus-ring: 0 0 0 3px rgba(184, 164, 255, 0.55);
+
+  /* Layout */
+  --content-width: 1180px;
+  --nav-height: 64px;
+  --tabbar-height: 64px;
+  --player-height: 76px;
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 420ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+    --duration-slow: 0ms;
+  }
+}
