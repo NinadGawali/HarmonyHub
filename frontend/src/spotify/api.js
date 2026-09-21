@@ -1,6 +1,5 @@
 import axios from 'axios';
 
-const APP_API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 const SPOTIFY_API_BASE_URL = 'https://api.spotify.com/v1';
 
 export class SpotifyApiError extends Error {
@@ -41,30 +40,6 @@ async function requestSpotify({ method, path, accessToken, params, data }) {
     throw new SpotifyApiError(message, status, payload);
   }
 }
-
-export const spotifyAuthApi = {
-  async getLoginUrl({ redirectUri, state }) {
-    const response = await axios.get(`${APP_API_BASE_URL}/spotify/auth/login-url`, {
-      params: { redirectUri, state }
-    });
-    return response.data;
-  },
-
-  async exchangeCodeForToken({ code, redirectUri }) {
-    const response = await axios.post(`${APP_API_BASE_URL}/spotify/auth/token`, {
-      code,
-      redirectUri
-    });
-    return response.data;
-  },
-
-  async refreshAccessToken(refreshToken) {
-    const response = await axios.post(`${APP_API_BASE_URL}/spotify/auth/refresh`, {
-      refreshToken
-    });
-    return response.data;
-  }
-};
 
 export const spotifyPlaybackApi = {
   async getDevices({ accessToken }) {

@@ -208,13 +208,21 @@ All variables are documented in [`.env.example`](.env.example). The main ones:
 | `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` | Spotify app credentials | - | Yes |
 | `GOOGLE_API_KEY` | Gemini key for AI playlists | - | For AI features |
 | `PORT` | Backend port | `3000` | No |
-| `CORS_ORIGIN` | Allowed frontend origin | `http://localhost:5173` | No |
+| `FRONTEND_URL` | Where the app is opened; used for redirects after login | `http://127.0.0.1:5173` | No |
+| `SPOTIFY_REDIRECT_URI` | Must match the Spotify dashboard exactly | `${FRONTEND_URL}/api/auth/spotify/callback` | No |
+| `TOKEN_ENCRYPTION_KEY` | Encrypts Spotify refresh tokens; create with `npm run secrets` | - | For Spotify login |
+| `CORS_ORIGIN` | Extra allowed origins, comma-separated | - | No |
 | `ROOM_TTL_SECONDS` | Lifetime of a party room and its data | `86400` | No |
 
-#### Frontend (.env)
+#### Frontend (`frontend/.env`, optional)
 
-| Variable | Description | Default | Required |
-|----------|-------------|---------|----------|
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `VITE_BACKEND_URL` | Backend that the Vite dev server proxies `/api` and `/socket.io` to | `http://127.0.0.1:3000` |
+
+The browser only talks to the frontend origin (`http://127.0.0.1:5173`). API and WebSocket calls are proxied to the backend, so no API URLs are compiled into the frontend.
+
+----------|-------------|---------|----------|
 | `VITE_API_URL` | Backend API URL | `http://localhost:3000/api` | No |
 | `VITE_SOCKET_URL` | Socket.io server URL | `http://localhost:3000` | No |
 | `VITE_SPOTIFY_REDIRECT_URI` | Spotify OAuth callback URL (must exactly match Spotify Dashboard) | `http://localhost:5173/spotify/callback` | No |

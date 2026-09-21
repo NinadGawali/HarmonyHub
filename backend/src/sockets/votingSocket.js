@@ -1,74 +1,110 @@
 const votingService = require('../services/votingService');
+const { authenticateSocket } = require('./socketAuth');
+const { allowRequest } = require('../utils/rateLimit');
 
+const MAX_REQUEST_QUERY_LENGTH = 200;
+const SONG_REQUESTS_PER_MINUTE = 5;
+
+// Per-user channel, so request outcomes reach only the requester (on every device).
 const userChannel = (userId) => `user:${userId}`;
+// Host-only channel for the pending song request queue.
+const hostChannel = (roomId) => `host:${roomId}`;
 
-// Expose expected, user-facing errors; hide unexpected ones behind a generic message.
-const errorMessage = (error, fallback) => (
-  error instanceof votingService.RoomNotFoundError ? error.message : fallback
-);
+// Errors whose message is safe and useful to show to the user.
+class ClientError extends Error {}
+
+const assertValue = (condition, message) => {
+  if (!condition) throw new ClientError(message);
+};
 
 module.exports = (io) => {
+  io.use(authenticateSocket);
+
+  const broadcastLeaderboard = async (roomId) => {
+    io.to(roomId).emit('leaderboard_update', await votingService.getLeaderboard(roomId));
+  };
+
+  const broadcastPendingRequests = async (roomId) => {
+    io.to(hostChannel(roomId)).emit('song_requests_updated', await votingService.getPendingSongRequests(roomId));
+  };
+
   io.on('connection', (socket) => {
-    console.log(`✅ User connected: ${socket.id}`);
+    const { user } = socket.data;
+    socket.join(userChannel(user.id));
 
-    // Join a room. Accepts a bare roomId (legacy) or { roomId, userId }.
-    socket.on('join_room', async (payload) => {
-      try {
-        const { roomId, userId } = typeof payload === 'string' ? { roomId: payload } : (payload || {});
+    const assertMember = (roomId) => {
+      assertValue(roomId && socket.rooms.has(roomId), 'Join the room first');
+    };
 
-        if (!roomId) {
-          socket.emit('error', { message: 'Room ID is required' });
-          return;
-        }
-
-        socket.join(roomId);
-        if (userId) {
-          // Per-user channel so request outcomes reach only the requester.
-          socket.join(userChannel(userId));
-        }
-
-        const [leaderboard, votingOpen, pendingRequests, myVotes] = await Promise.all([
-          votingService.getLeaderboard(roomId),
-          votingService.getVotingStatus(roomId),
-          votingService.getPendingSongRequests(roomId),
-          userId ? votingService.getUserVotes(roomId, userId) : []
-        ]);
-
-        socket.emit('leaderboard_update', leaderboard);
-        socket.emit('voting_status_changed', { isOpen: votingOpen });
-        socket.emit('song_requests_updated', pendingRequests);
-        socket.emit('my_votes', { songIds: myVotes });
-
-        socket.to(roomId).emit('user_joined', {
-          userId: socket.id,
-          timestamp: new Date().toISOString()
-        });
-      } catch (error) {
-        console.error('Error joining room:', error);
-        socket.emit('error', { message: 'Failed to join room' });
+    const assertHost = async (roomId) => {
+      assertMember(roomId);
+      if (!(await votingService.roomExists(roomId))) {
+        throw new votingService.RoomNotFoundError(roomId);
       }
-    });
+      assertValue(await votingService.isRoomHost(roomId, user.id), 'Only the host can do that');
+    };
 
-    // Vote for a song
-    socket.on('vote_song', async (data) => {
-      const { roomId, songId, userId } = data || {};
+    // Registers a handler with uniform error reporting.
+    const on = (event, handler, fallbackMessage) => {
+      socket.on(event, async (payload) => {
+        try {
+          await handler(payload || {});
+        } catch (error) {
+          if (error instanceof ClientError || error instanceof votingService.RoomNotFoundError) {
+            socket.emit('error', { event, message: error.message });
+            return;
+          }
+          console.error(`Socket "${event}" failed:`, error);
+          socket.emit('error', { event, message: fallbackMessage });
+        }
+      });
+    };
 
+    // Accepts { roomId } (or a bare roomId string from older clients).
+    on('join_room', async (payload) => {
+      const roomId = typeof payload === 'string' ? payload : payload.roomId;
+      assertValue(roomId, 'Room ID is required');
+      if (!(await votingService.roomExists(roomId))) {
+        throw new votingService.RoomNotFoundError(roomId);
+      }
+
+      const isHost = await votingService.isRoomHost(roomId, user.id);
+      socket.join(roomId);
+      if (isHost) {
+        socket.join(hostChannel(roomId));
+      }
+      await votingService.addRoomMember(roomId, user.id);
+
+      const [leaderboard, votingOpen, myVotes] = await Promise.all([
+        votingService.getLeaderboard(roomId),
+        votingService.getVotingStatus(roomId),
+        votingService.getUserVotes(roomId, user.id)
+      ]);
+
+      socket.emit('room_joined', { roomId, isHost, user: { id: user.id, displayName: user.displayName } });
+      socket.emit('leaderboard_update', leaderboard);
+      socket.emit('voting_status_changed', { isOpen: votingOpen });
+      socket.emit('my_votes', { songIds: myVotes });
+      if (isHost) {
+        socket.emit('song_requests_updated', await votingService.getPendingSongRequests(roomId));
+      }
+    }, 'Failed to join room');
+
+    socket.on('vote_song', async ({ roomId, songId } = {}) => {
       const reject = (code, message) => socket.emit('vote_rejected', { songId, code, message });
 
-      if (!roomId || !songId || !userId) {
-        reject('INVALID', 'Invalid vote data');
+      if (!roomId || !songId || !socket.rooms.has(roomId)) {
+        reject('INVALID', 'Invalid vote');
         return;
       }
 
       try {
-        const votingOpen = await votingService.getVotingStatus(roomId);
-        if (!votingOpen) {
+        if (!(await votingService.getVotingStatus(roomId))) {
           reject('VOTING_CLOSED', 'Voting is closed');
           return;
         }
 
-        const leaderboard = await votingService.voteSong(roomId, songId, userId);
-
+        const leaderboard = await votingService.voteSong(roomId, songId, user.id);
         io.to(roomId).emit('leaderboard_update', leaderboard);
         socket.emit('vote_success', { songId });
       } catch (error) {
@@ -76,248 +112,128 @@ module.exports = (io) => {
           reject(error.code, error.message);
           return;
         }
-
         console.error('Error voting for song:', error);
         reject('SERVER_ERROR', 'Failed to vote for song');
       }
     });
 
-    // Add song to room (admin only)
-    socket.on('add_song', async (data) => {
-      try {
-        const { roomId, songData } = data;
+    on('add_song', async ({ roomId, songData }) => {
+      await assertHost(roomId);
+      assertValue(songData?.songId && songData.title && songData.artist, 'Song data is incomplete');
+      await votingService.addSongToRoom(roomId, songData);
+      await broadcastLeaderboard(roomId);
+    }, 'Failed to add song');
 
-        if (!roomId || !songData) {
-          socket.emit('error', { message: 'Invalid song data' });
-          return;
-        }
+    on('remove_song', async ({ roomId, songId }) => {
+      await assertHost(roomId);
+      assertValue(songId, 'Song ID is required');
+      await votingService.removeSongFromRoom(roomId, songId);
+      await broadcastLeaderboard(roomId);
+    }, 'Failed to remove song');
 
-        await votingService.addSongToRoom(roomId, songData);
+    on('toggle_voting', async ({ roomId, isOpen }) => {
+      await assertHost(roomId);
+      assertValue(typeof isOpen === 'boolean', 'isOpen must be true or false');
+      await votingService.setVotingStatus(roomId, isOpen);
+      io.to(roomId).emit('voting_status_changed', { isOpen });
+    }, 'Failed to toggle voting');
 
-        // Get updated leaderboard
-        const leaderboard = await votingService.getLeaderboard(roomId);
-
-        // Broadcast updated leaderboard to all users in the room
-        io.to(roomId).emit('leaderboard_update', leaderboard);
-
-        console.log(`Song added to room ${roomId}: ${songData.title}`);
-      } catch (error) {
-        console.error('Error adding song:', error);
-        socket.emit('error', { message: errorMessage(error, 'Failed to add song') });
-      }
-    });
-
-    // Remove song from room (admin only)
-    socket.on('remove_song', async (data) => {
-      try {
-        const { roomId, songId } = data;
-
-        if (!roomId || !songId) {
-          socket.emit('error', { message: 'Invalid data' });
-          return;
-        }
-
-        await votingService.removeSongFromRoom(roomId, songId);
-
-        // Get updated leaderboard
-        const leaderboard = await votingService.getLeaderboard(roomId);
-
-        // Broadcast updated leaderboard to all users in the room
-        io.to(roomId).emit('leaderboard_update', leaderboard);
-
-        console.log(`Song removed from room ${roomId}: ${songId}`);
-      } catch (error) {
-        console.error('Error removing song:', error);
-        socket.emit('error', { message: 'Failed to remove song' });
-      }
-    });
-
-    // Toggle voting status (admin only)
-    socket.on('toggle_voting', async (data) => {
-      try {
-        const { roomId, isOpen } = data;
-
-        if (!roomId || isOpen === undefined) {
-          socket.emit('error', { message: 'Invalid data' });
-          return;
-        }
-
-        await votingService.setVotingStatus(roomId, isOpen);
-
-        // Broadcast to all users in the room
-        io.to(roomId).emit('voting_status_changed', { isOpen });
-
-        console.log(`Voting ${isOpen ? 'opened' : 'closed'} for room ${roomId}`);
-      } catch (error) {
-        console.error('Error toggling voting:', error);
-        socket.emit('error', { message: errorMessage(error, 'Failed to toggle voting') });
-      }
-    });
-
-    // Relay Spotify playback commands to all clients in a room.
-    socket.on('spotify_control', (data) => {
-      try {
-        const { roomId, action, payload } = data || {};
-
-        if (!roomId || !action) {
-          socket.emit('error', { message: 'Invalid Spotify control payload' });
-          return;
-        }
-
-        io.to(roomId).emit('spotify_control', {
-          action,
-          payload: payload || {},
-          originSocketId: socket.id,
-          serverTimestamp: Date.now()
-        });
-      } catch (error) {
-        console.error('Error relaying Spotify control event:', error);
-        socket.emit('error', { message: 'Failed to relay Spotify control event' });
-      }
-    });
-
-    // Relay periodic playback state snapshots to tighten drift between clients.
-    socket.on('spotify_sync_state', (data) => {
-      try {
-        const { roomId, trackUri, positionMs, isPaused } = data || {};
-
-        if (!roomId || !trackUri) {
-          socket.emit('error', { message: 'Invalid Spotify sync payload' });
-          return;
-        }
-
-        socket.to(roomId).emit('spotify_sync_state', {
-          trackUri,
-          positionMs: Number(positionMs || 0),
-          isPaused: Boolean(isPaused),
-          originSocketId: socket.id,
-          serverTimestamp: Date.now()
-        });
-      } catch (error) {
-        console.error('Error relaying Spotify sync event:', error);
-        socket.emit('error', { message: 'Failed to relay Spotify sync event' });
-      }
-    });
-
-    // Submit song request (participant)
-    socket.on('submit_song_request', async (data) => {
-      try {
-        const { roomId, userId, userName, query } = data || {};
-
-        if (!roomId || !userId || !query || !query.trim()) {
-          socket.emit('error', { message: 'Invalid request data' });
-          return;
-        }
-
-        const request = await votingService.submitSongRequest(roomId, {
-          userId,
-          userName,
-          query: query.trim()
-        });
-
-        const pendingRequests = await votingService.getPendingSongRequests(roomId);
-        io.to(roomId).emit('song_requests_updated', pendingRequests);
-
-        socket.emit('song_request_submitted', {
-          requestId: request.requestId,
-          message: 'Request sent to admin'
-        });
-      } catch (error) {
-        console.error('Error submitting song request:', error);
-        socket.emit('error', { message: errorMessage(error, 'Failed to submit song request') });
-      }
-    });
-
-    // Get pending song requests
-    socket.on('get_song_requests', async (data) => {
-      try {
-        const { roomId } = data || {};
-
-        if (!roomId) {
-          socket.emit('error', { message: 'Invalid room data' });
-          return;
-        }
-
-        const pendingRequests = await votingService.getPendingSongRequests(roomId);
-        socket.emit('song_requests_updated', pendingRequests);
-      } catch (error) {
-        console.error('Error fetching song requests:', error);
-        socket.emit('error', { message: error.message || 'Failed to fetch song requests' });
-      }
-    });
-
-    // Approve song request (admin)
-    socket.on('approve_song_request', async (data) => {
-      try {
-        const { roomId, requestId } = data || {};
-
-        if (!roomId || !requestId) {
-          socket.emit('error', { message: 'Invalid request approval data' });
-          return;
-        }
-
-        const approved = await votingService.approveSongRequest(roomId, requestId);
-        const leaderboard = await votingService.getLeaderboard(roomId);
-        const pendingRequests = await votingService.getPendingSongRequests(roomId);
-
-        io.to(roomId).emit('leaderboard_update', leaderboard);
-        io.to(roomId).emit('song_requests_updated', pendingRequests);
-        const outcome = {
-          requestId,
-          status: 'approved',
-          songTitle: approved.songData.title
-        };
-        socket.emit('song_request_processed', outcome);
-        if (approved.requesterId) {
-          io.to(userChannel(approved.requesterId)).emit('song_request_processed', outcome);
-        }
-      } catch (error) {
-        console.error('Error approving song request:', error);
-        socket.emit('error', { message: error.message || 'Failed to approve song request' });
-      }
-    });
-
-    // Reject song request (admin)
-    socket.on('reject_song_request', async (data) => {
-      try {
-        const { roomId, requestId } = data || {};
-
-        if (!roomId || !requestId) {
-          socket.emit('error', { message: 'Invalid request rejection data' });
-          return;
-        }
-
-        const rejected = await votingService.rejectSongRequest(roomId, requestId);
-        const pendingRequests = await votingService.getPendingSongRequests(roomId);
-
-        io.to(roomId).emit('song_requests_updated', pendingRequests);
-
-        const outcome = { requestId, status: 'rejected' };
-        socket.emit('song_request_processed', outcome);
-        if (rejected.requesterId) {
-          io.to(userChannel(rejected.requesterId)).emit('song_request_processed', outcome);
-        }
-      } catch (error) {
-        console.error('Error rejecting song request:', error);
-        socket.emit('error', { message: error.message || 'Failed to reject song request' });
-      }
-    });
-
-    // Leave room
-    socket.on('leave_room', (roomId) => {
-      socket.leave(roomId);
-      console.log(`User ${socket.id} left room ${roomId}`);
-
-      // Notify others in the room
-      socket.to(roomId).emit('user_left', {
-        userId: socket.id,
-        timestamp: new Date().toISOString()
+    // Relay Spotify playback commands from the host to everyone in the room.
+    on('spotify_control', async ({ roomId, action, payload }) => {
+      await assertHost(roomId);
+      assertValue(action, 'Action is required');
+      io.to(roomId).emit('spotify_control', {
+        action,
+        payload: payload || {},
+        originSocketId: socket.id,
+        serverTimestamp: Date.now()
       });
-    });
+    }, 'Failed to relay Spotify control event');
 
-    // Disconnect
-    socket.on('disconnect', () => {
-      console.log(`❌ User disconnected: ${socket.id}`);
+    // Relay periodic playback snapshots from the host to reduce drift between clients.
+    on('spotify_sync_state', async ({ roomId, trackUri, positionMs, isPaused }) => {
+      await assertHost(roomId);
+      assertValue(trackUri, 'Track URI is required');
+      socket.to(roomId).emit('spotify_sync_state', {
+        trackUri,
+        positionMs: Number(positionMs || 0),
+        isPaused: Boolean(isPaused),
+        originSocketId: socket.id,
+        serverTimestamp: Date.now()
+      });
+    }, 'Failed to relay Spotify sync event');
+
+    on('submit_song_request', async ({ roomId, query }) => {
+      assertMember(roomId);
+      const text = typeof query === 'string' ? query.trim() : '';
+      assertValue(text, 'Enter a song name or Spotify link');
+      assertValue(text.length <= MAX_REQUEST_QUERY_LENGTH, `Requests are limited to ${MAX_REQUEST_QUERY_LENGTH} characters`);
+      assertValue(
+        await allowRequest(`songrequest:${user.id}`, SONG_REQUESTS_PER_MINUTE, 60),
+        'You are sending requests too quickly. Try again in a minute.'
+      );
+
+      const request = await votingService.submitSongRequest(roomId, {
+        userId: user.id,
+        userName: user.displayName,
+        query: text
+      });
+
+      socket.emit('song_request_submitted', { requestId: request.requestId, message: 'Request sent to the host' });
+      await broadcastPendingRequests(roomId);
+    }, 'Failed to submit song request');
+
+    on('get_song_requests', async ({ roomId }) => {
+      await assertHost(roomId);
+      socket.emit('song_requests_updated', await votingService.getPendingSongRequests(roomId));
+    }, 'Failed to fetch song requests');
+
+    on('approve_song_request', async ({ roomId, requestId }) => {
+      await assertHost(roomId);
+      assertValue(requestId, 'Request ID is required');
+
+      let approved;
+      try {
+        approved = await votingService.approveSongRequest(roomId, requestId);
+      } catch (error) {
+        // Not found / already processed / no Spotify match are all user-facing outcomes.
+        throw new ClientError(error.message);
+      }
+
+      await broadcastLeaderboard(roomId);
+      await broadcastPendingRequests(roomId);
+
+      const outcome = { requestId, status: 'approved', songTitle: approved.songData.title };
+      socket.emit('song_request_processed', outcome);
+      if (approved.requesterId && approved.requesterId !== user.id) {
+        io.to(userChannel(approved.requesterId)).emit('song_request_processed', outcome);
+      }
+    }, 'Failed to approve song request');
+
+    on('reject_song_request', async ({ roomId, requestId }) => {
+      await assertHost(roomId);
+      assertValue(requestId, 'Request ID is required');
+
+      let rejected;
+      try {
+        rejected = await votingService.rejectSongRequest(roomId, requestId);
+      } catch (error) {
+        throw new ClientError(error.message);
+      }
+
+      await broadcastPendingRequests(roomId);
+
+      const outcome = { requestId, status: 'rejected' };
+      socket.emit('song_request_processed', outcome);
+      if (rejected.requesterId && rejected.requesterId !== user.id) {
+        io.to(userChannel(rejected.requesterId)).emit('song_request_processed', outcome);
+      }
+    }, 'Failed to reject song request');
+
+    socket.on('leave_room', (roomId) => {
+      if (typeof roomId !== 'string') return;
+      socket.leave(roomId);
+      socket.leave(hostChannel(roomId));
     });
   });
 };

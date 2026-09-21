@@ -1,10 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { MapPin, Navigation, AlertTriangle, Ban } from 'lucide-react';
 import { locationAPI } from '../api/api';
+import { useAuth } from '../auth/AuthProvider';
 
 const LOCATION_STORAGE_KEY = 'harmonyhub.location.v1';
 
+// Captures the browser location for signed-in users and stores it on their account.
 export default function LocationTracker() {
+  const { user } = useAuth();
   const hasCapturedOnceRef = useRef(false);
   const lastResolvedKeyRef = useRef('');
   const [location, setLocation] = useState(null);
@@ -124,7 +127,7 @@ export default function LocationTracker() {
   }, [handleError, handleSuccess]);
 
   useEffect(() => {
-    if (hasCapturedOnceRef.current) {
+    if (!user || hasCapturedOnceRef.current) {
       return;
     }
 
@@ -147,7 +150,11 @@ export default function LocationTracker() {
     }
 
     captureLocationOnce();
-  }, [captureLocationOnce, sendLocationToBackend]);
+  }, [user, captureLocationOnce, sendLocationToBackend]);
+
+  if (!user) {
+    return null;
+  }
 
   const getStatusIcon = () => {
     if (status === 'denied') return <Ban size={16} />;

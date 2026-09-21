@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useParams, useLocation, useNavigate } from 'react-router-dom';
-import { songAPI, spotifyAPI } from '../api/api';
+import { Link, useParams, useNavigate } from 'react-router-dom';
+import { roomAPI, songAPI, spotifyAPI } from '../api/api';
 import useSocket from '../hooks/useSocket';
 import Leaderboard from '../components/Leaderboard';
 import QRJoin from '../components/QRJoin';
@@ -8,10 +8,10 @@ import MusicPlayer from '../components/MusicPlayer';
 import { socket } from '../socket/socket';
 import { ArrowLeft, Search, Plus, Wifi, WifiOff, X, Play, Pause } from 'lucide-react';
 import { useToast } from '../components/Toast';
+import { useAuth } from '../auth/AuthProvider';
 
 export default function Admin() {
   const { roomId } = useParams();
-  const location = useLocation();
   const navigate = useNavigate();
   const [songs, setSongs] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -23,7 +23,8 @@ export default function Admin() {
   const [votingOpen, setVotingOpen] = useState(true);
   const [togglingVoting, setTogglingVoting] = useState(false);
   const [songRequests, setSongRequests] = useState([]);
-  const adminName = location.state?.adminName || 'Admin';
+  const [isHost, setIsHost] = useState(false);
+  const { user } = useAuth();
   const toast = useToast();
 
   // Handle leaderboard updates
@@ -31,8 +32,8 @@ export default function Admin() {
     setSongs(leaderboard);
   }, []);
 
-  // Connect to socket
-  useSocket(roomId, handleLeaderboardUpdate);
+  // Connect only once the server confirmed this user hosts the room.
+  useSocket(roomId, handleLeaderboardUpdate, isHost);
 
   // Monitor connection status
   useEffect(() => {
@@ -68,6 +69,10 @@ export default function Admin() {
 
     const handleSocketError = (data) => {
       setTogglingVoting(false);
+      if (data?.event === 'join_room') {
+        setError(data.message || 'Failed to join room');
+        return;
+      }
       toast.error(data?.message || 'Something went wrong');
     };
 
@@ -75,8 +80,6 @@ export default function Admin() {
     socket.on('song_requests_updated', handleSongRequestsUpdated);
     socket.on('song_request_processed', handleSongRequestProcessed);
     socket.on('error', handleSocketError);
-
-    socket.emit('get_song_requests', { roomId });
 
     return () => {
       socket.off('voting_status_changed', handleVotingStatusChange);
@@ -86,20 +89,43 @@ export default function Admin() {
     };
   }, [roomId, toast]);
 
-  // Load initial leaderboard
+  // Confirm host access, then load the initial state
   useEffect(() => {
-    const loadLeaderboard = async () => {
+    let cancelled = false;
+
+    const loadRoom = async () => {
       try {
+        const { data: room } = await roomAPI.get(roomId);
+        if (cancelled) return;
+
+        setVotingOpen(room.votingOpen);
+        if (!room.isHost) {
+          setError('Only the host can manage this room.');
+          return;
+        }
+
         const response = await songAPI.getLeaderboard(roomId);
-        setSongs(response.data.leaderboard);
+        if (!cancelled) {
+          setSongs(response.data.leaderboard);
+          setIsHost(true);
+        }
       } catch (err) {
-        setError(err.response?.data?.error || 'Failed to load leaderboard');
+        if (!cancelled) {
+          setError(err.response?.status === 404
+            ? 'This room does not exist or has expired.'
+            : err.response?.data?.error || 'Failed to load the room');
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     };
 
-    loadLeaderboard();
+    loadRoom();
+    return () => {
+      cancelled = true;
+    };
   }, [roomId]);
 
   // Search Spotify
@@ -165,6 +191,17 @@ export default function Admin() {
     );
   }
 
+  if (!isHost) {
+    return (
+      <div className="error-container">
+        <h2>Can&apos;t open the admin panel</h2>
+        <p>{error || 'Only the host can manage this room.'}</p>
+        <Link to={`/room/${roomId}`} className="btn-primary">Open as guest</Link>
+        <button onClick={() => navigate('/')} className="btn-secondary">Back to Home</button>
+      </div>
+    );
+  }
+
   return (
     <div className="admin-page">
       <header className="admin-header">
@@ -175,7 +212,7 @@ export default function Admin() {
         <div className="admin-info">
           <h1>Admin Panel</h1>
           <div className="admin-meta">
-            <span className="admin-badge">{adminName}</span>
+            <span className="admin-badge">{user?.displayName}</span>
             <span className="room-code-badge">Room: {roomId}</span>
             <span className={`status-badge ${connected ? 'connected' : 'disconnected'}`}>
               {connected ? <Wifi size={16} /> : <WifiOff size={16} />}

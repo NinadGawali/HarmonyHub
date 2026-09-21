@@ -3,6 +3,49 @@
 Each phase of the [refinement plan](docs/REFINEMENT_PLAN.md) ships as a tagged, runnable version.
 Check out any version with `git checkout v<version>`.
 
+## [0.3.0] - 2026-09-21 — Phase 3: authentication
+
+### Added
+- **Spotify login handled by the backend.** Authorization Code flow with PKCE and single-use state
+  stored in Redis. The refresh token is stored encrypted (AES-256-GCM) in Postgres and access tokens
+  are refreshed server-side. The browser never sees a refresh token.
+- **Guest sessions.** Guests join a party with just a name and get a real server-side identity, so
+  votes survive refreshes and can't be faked. Only hosts need Spotify accounts.
+- Sessions use an httpOnly `hh_sid` cookie backed by Redis, with sliding expiry
+  (7 days for Spotify users, 24 hours for guests). The session id is rotated on every login.
+- Authenticated WebSockets: connections without a session are refused. The user id always comes from
+  the session, and client-supplied `userId` fields are ignored.
+- Host-only room actions (add/remove songs, voting toggle, request approval, playback relay) are
+  enforced on the server.
+- `/login` page, a user menu with logout, a guest join form for room links, and route guards.
+  Hosting, the admin panel and playlists require Spotify; rooms accept guests.
+- Rate limits for guest creation (per IP) and song requests (per user).
+- `npm run secrets` generates `TOKEN_ENCRYPTION_KEY`. `npm run doctor` checks it and the redirect URI.
+- Auth test suite (sessions, OAuth redirect/state/PKCE, open-redirect protection, route guards,
+  socket authorization, per-user location).
+
+### Fixed
+- **Spotify "redirect URI not valid".** Spotify no longer accepts `localhost`, and the old client picked
+  whatever origin the page was opened on. The redirect URI is now fixed in config
+  (`http://127.0.0.1:5173/api/auth/spotify/callback`) and validated at startup. The app redirects
+  `localhost` to `127.0.0.1`, and the Vite dev server (or nginx) proxies `/api` and `/socket.io`
+  so the browser uses a single origin.
+- **Location was shared by all users.** The server kept one global "latest location". It is now
+  stored per user in Postgres.
+- Hosts could approve or reject song requests belonging to other rooms.
+- Pending song requests (with guests' names) were broadcast to everyone in the room; only the host receives them now.
+- Anyone in a room could close voting, remove songs or approve requests.
+- A room code could be reissued while that room was still active.
+
+### Changed
+- Removed the client-side OAuth code (`/spotify/callback` page, `localStorage` tokens) and the old
+  `/api/spotify/auth/*` endpoints. Removed `VITE_API_URL` / `VITE_SOCKET_URL`.
+- Rewrote `docs/TROUBLESHOOTING.md` for the current setup.
+
+### Known limitations
+- A guest who later logs in with Spotify starts with a new identity; their earlier guest votes are
+  not merged. This is planned for the next phase, when votes move to Postgres.
+
 ## [0.2.0] - 2026-09-21 — Phase 2: infrastructure and database
 
 ### Added

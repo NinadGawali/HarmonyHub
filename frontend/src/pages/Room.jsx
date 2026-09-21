@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useParams, useLocation, useNavigate } from 'react-router-dom';
-import { songAPI } from '../api/api';
+import { useParams, useNavigate } from 'react-router-dom';
+import { roomAPI, songAPI } from '../api/api';
 import useSocket from '../hooks/useSocket';
 import Leaderboard from '../components/Leaderboard';
 import SideSongPlayer from '../components/SideSongPlayer';
@@ -8,11 +8,11 @@ import { socket } from '../socket/socket';
 import { ArrowLeft, Users, Wifi, WifiOff } from 'lucide-react';
 import useSpotifyPlayer from '../spotify/hooks/useSpotifyPlayer';
 import { useToast } from '../components/Toast';
-import { resolveRoomIdentity } from '../utils/roomIdentity';
+import { useAuth } from '../auth/AuthProvider';
+import GuestJoin from '../components/GuestJoin';
 
 export default function Room() {
   const { roomId } = useParams();
-  const location = useLocation();
   const navigate = useNavigate();
   const [songs, setSongs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -26,7 +26,8 @@ export default function Room() {
   const [submittingRequest, setSubmittingRequest] = useState(false);
   const [spotifyUiError, setSpotifyUiError] = useState('');
   const [selectedSongId, setSelectedSongId] = useState(null);
-  const [{ userId, userName }] = useState(() => resolveRoomIdentity(roomId, location.state));
+  const [joined, setJoined] = useState(false);
+  const { user, loading: authLoading } = useAuth();
   const toast = useToast();
 
   const {
@@ -100,8 +101,8 @@ export default function Room() {
     setSongs(leaderboard);
   }, []);
 
-  // Connect to socket
-  useSocket(roomId, handleLeaderboardUpdate, userId);
+  // Connect only after the REST join confirmed the room exists and registered membership.
+  useSocket(roomId, handleLeaderboardUpdate, joined);
 
   // Monitor connection status
   useEffect(() => {
@@ -139,12 +140,16 @@ export default function Room() {
 
     const handleSocketError = (data) => {
       setSubmittingRequest(false);
+      if (data?.event === 'join_room') {
+        setError(data.message || 'Failed to join room');
+        return;
+      }
       toast.error(data?.message || 'Something went wrong');
     };
 
     const handleRequestSubmitted = (data) => {
       setSubmittingRequest(false);
-      setRequestStatus(data?.message || 'Request sent to admin');
+      setRequestStatus(data?.message || 'Request sent to the host');
       setSongRequest('');
     };
 
@@ -155,8 +160,8 @@ export default function Room() {
         toast.success(message);
       }
       if (data?.status === 'rejected') {
-        setRequestStatus('Your request was rejected by admin');
-        toast.info('Your request was rejected by admin');
+        setRequestStatus('Your request was rejected by the host');
+        toast.info('Your request was rejected by the host');
       }
     };
 
@@ -183,21 +188,42 @@ export default function Room() {
     };
   }, [toast]);
 
-  // Load initial leaderboard
+  // Join the room (validates it exists) and load the initial leaderboard once signed in
   useEffect(() => {
-    const loadLeaderboard = async () => {
+    if (!user) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+    setError('');
+
+    const enterRoom = async () => {
       try {
+        await roomAPI.join(roomId);
         const response = await songAPI.getLeaderboard(roomId);
-        setSongs(response.data.leaderboard);
+        if (!cancelled) {
+          setSongs(response.data.leaderboard);
+          setJoined(true);
+        }
       } catch (err) {
-        setError(err.response?.data?.error || 'Failed to load leaderboard');
+        if (!cancelled) {
+          setError(err.response?.status === 404
+            ? 'This room does not exist or has expired.'
+            : err.response?.data?.error || 'Failed to load the room');
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     };
 
-    loadLeaderboard();
-  }, [roomId]);
+    enterRoom();
+    return () => {
+      cancelled = true;
+    };
+  }, [roomId, user]);
 
   // Handle vote
   const handleVote = (songId) => {
@@ -216,7 +242,7 @@ export default function Room() {
     }
 
     setPendingVotes((prev) => new Set([...prev, songId]));
-    socket.emit('vote_song', { roomId, songId, userId });
+    socket.emit('vote_song', { roomId, songId });
   };
 
   const handleSongSelect = (song) => {
@@ -300,13 +326,20 @@ export default function Room() {
     setSubmittingRequest(true);
     setRequestStatus('');
 
-    socket.emit('submit_song_request', {
-      roomId,
-      userId,
-      userName,
-      query: songRequest.trim()
-    });
+    socket.emit('submit_song_request', { roomId, query: songRequest.trim() });
   };
+
+  if (authLoading) {
+    return (
+      <div className="loading-container">
+        <div className="spinner"></div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <GuestJoin roomId={roomId} />;
+  }
 
   if (loading) {
     return (
@@ -341,7 +374,7 @@ export default function Room() {
           <div className="room-meta">
             <span className="user-badge">
               <Users size={16} />
-              {userName}
+              {user.displayName}
             </span>
             <span className={`status-badge ${connected ? 'connected' : 'disconnected'}`}>
               {connected ? <Wifi size={16} /> : <WifiOff size={16} />}

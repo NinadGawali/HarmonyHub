@@ -1,51 +1,57 @@
 const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const {
-  startServer, stopServer, request, connectClient, nextEvent, firstEvent
+  startServer, stopServer, request, createGuestSession, createFixtures,
+  connectClient, nextEvent, firstEvent, joinRoom
 } = require('./helpers/server');
 
 const song = (songId) => ({ songId, title: `Title ${songId}`, artist: 'Artist' });
 
 describe('party room voting', () => {
   let server;
+  let fixtures;
+  let host;
+  let guest;
   let roomId;
-  let guestId;
   const clients = [];
 
-  const client = async () => {
-    const socket = await connectClient();
+  const client = async (cookie) => {
+    const socket = await connectClient(cookie);
     clients.push(socket);
     return socket;
   };
 
-  const join = async (socket, userId) => {
-    const myVotes = nextEvent(socket, 'my_votes');
-    socket.emit('join_room', { roomId, userId });
-    return myVotes;
+  const newGuest = async (name) => {
+    const session = await createGuestSession(name);
+    fixtures.trackUser(session.user.id);
+    return session;
   };
 
-  const vote = (socket, songId, userId) => {
+  const vote = (socket, songId) => {
     const outcome = firstEvent(socket, ['vote_success', 'vote_rejected']);
-    socket.emit('vote_song', { roomId, songId, userId });
+    socket.emit('vote_song', { roomId, songId });
     return outcome;
   };
 
   before(async () => {
     server = await startServer();
-    ({ body: { roomId } } = await request('POST', '/api/rooms', { adminName: 'Host' }));
-    ({ body: { userId: guestId } } = await request('POST', `/api/rooms/${roomId}/join`, { userName: 'Ana' }));
+    fixtures = await createFixtures();
+    host = await fixtures.createSpotifySession('Host');
+    guest = await newGuest('Ana');
+    ({ body: { roomId } } = await request('POST', '/api/rooms', { cookie: host.cookie }));
   });
 
   after(async () => {
     clients.forEach((socket) => socket.close());
-    await request('DELETE', `/api/rooms/${roomId}`);
+    await request('DELETE', `/api/rooms/${roomId}`, { cookie: host.cookie });
+    await fixtures.cleanup();
     await stopServer(server);
   });
 
   it('reports voting as open when joining a new room', async () => {
-    const admin = await client();
+    const admin = await client(host.cookie);
     const status = nextEvent(admin, 'voting_status_changed');
-    admin.emit('join_room', { roomId });
+    await joinRoom(admin, roomId);
     assert.equal((await status).isOpen, true);
 
     const updated = nextEvent(admin, 'leaderboard_update');
@@ -54,74 +60,73 @@ describe('party room voting', () => {
   });
 
   it('accepts a first vote without closing and reopening voting', async () => {
-    const guest = await client();
-    await join(guest, guestId);
-    const { event } = await vote(guest, 's1', guestId);
-    assert.equal(event, 'vote_success');
+    const socket = await client(guest.cookie);
+    await joinRoom(socket, roomId);
+    assert.equal((await vote(socket, 's1')).event, 'vote_success');
   });
 
   it('rejects duplicate votes and votes for unknown songs', async () => {
-    const guest = await client();
-    await join(guest, guestId);
+    const socket = await client(guest.cookie);
+    await joinRoom(socket, roomId);
 
-    const duplicate = await vote(guest, 's1', guestId);
-    assert.equal(duplicate.data.code, 'ALREADY_VOTED');
+    assert.equal((await vote(socket, 's1')).data.code, 'ALREADY_VOTED');
+    assert.equal((await vote(socket, 'missing')).data.code, 'SONG_NOT_FOUND');
 
-    const unknown = await vote(guest, 'missing', guestId);
-    assert.equal(unknown.data.code, 'SONG_NOT_FOUND');
-
-    const { body } = await request('GET', `/api/rooms/${roomId}/leaderboard`);
+    const { body } = await request('GET', `/api/rooms/${roomId}/leaderboard`, { cookie: guest.cookie });
     assert.deepEqual(body.leaderboard.map(({ songId, votes }) => ({ songId, votes })), [{ songId: 's1', votes: 1 }]);
   });
 
-  it('restores the user\'s votes after a refresh', async () => {
-    const refreshed = await client();
-    const { songIds } = await join(refreshed, guestId);
+  it('restores the user\'s votes on a new connection', async () => {
+    const socket = await client(guest.cookie);
+    const { songIds } = await joinRoom(socket, roomId);
     assert.deepEqual(songIds, ['s1']);
   });
 
   it('rejects votes while closed and accepts them after reopening', async () => {
-    const admin = await client();
-    const other = await client();
-    await join(other, 'other-user');
+    const admin = await client(host.cookie);
+    await joinRoom(admin, roomId);
+    const other = await client((await newGuest('Ben')).cookie);
+    await joinRoom(other, roomId);
 
     let status = nextEvent(other, 'voting_status_changed');
     admin.emit('toggle_voting', { roomId, isOpen: false });
     assert.equal((await status).isOpen, false);
-    assert.equal((await vote(other, 's1', 'other-user')).data.code, 'VOTING_CLOSED');
+    assert.equal((await vote(other, 's1')).data.code, 'VOTING_CLOSED');
 
     status = nextEvent(other, 'voting_status_changed');
     admin.emit('toggle_voting', { roomId, isOpen: true });
     await status;
-    assert.equal((await vote(other, 's1', 'other-user')).event, 'vote_success');
+    assert.equal((await vote(other, 's1')).event, 'vote_success');
   });
 
-  it('sends a request outcome only to the requester', async () => {
-    const admin = await client();
-    const guest = await client();
-    const bystander = await client();
-    admin.emit('join_room', { roomId });
-    await join(guest, guestId);
-    await join(bystander, 'bystander');
+  it('shows pending requests only to the host and outcomes only to the requester', async () => {
+    const admin = await client(host.cookie);
+    await joinRoom(admin, roomId);
+    const requester = await client(guest.cookie);
+    await joinRoom(requester, roomId);
+    const bystander = await client((await newGuest('Cy')).cookie);
+    await joinRoom(bystander, roomId);
 
-    let bystanderNotified = false;
-    bystander.on('song_request_processed', () => { bystanderNotified = true; });
+    const bystanderEvents = [];
+    bystander.on('song_requests_updated', () => bystanderEvents.push('song_requests_updated'));
+    bystander.on('song_request_processed', () => bystanderEvents.push('song_request_processed'));
 
     const pending = nextEvent(admin, 'song_requests_updated');
-    guest.emit('submit_song_request', { roomId, userId: guestId, userName: 'Ana', query: 'anything' });
+    requester.emit('submit_song_request', { roomId, query: 'anything' });
     const [requestItem] = await pending;
+    assert.equal(requestItem.userName, 'Ana');
 
-    const outcome = nextEvent(guest, 'song_request_processed');
+    const outcome = nextEvent(requester, 'song_request_processed');
     admin.emit('reject_song_request', { roomId, requestId: requestItem.requestId });
     assert.equal((await outcome).status, 'rejected');
 
     await new Promise((resolve) => setTimeout(resolve, 200));
-    assert.equal(bystanderNotified, false);
+    assert.deepEqual(bystanderEvents, []);
   });
 
   it('keeps votes when a song is added again, and resets them after removal', async () => {
-    const admin = await client();
-    admin.emit('join_room', { roomId });
+    const admin = await client(host.cookie);
+    await joinRoom(admin, roomId);
 
     let updated = nextEvent(admin, 'leaderboard_update');
     admin.emit('add_song', { roomId, songData: song('s1') });
@@ -135,8 +140,8 @@ describe('party room voting', () => {
     admin.emit('add_song', { roomId, songData: song('s1') });
     await updated;
 
-    const guest = await client();
-    await join(guest, guestId);
-    assert.equal((await vote(guest, 's1', guestId)).event, 'vote_success');
+    const socket = await client(guest.cookie);
+    await joinRoom(socket, roomId);
+    assert.equal((await vote(socket, 's1')).event, 'vote_success');
   });
 });

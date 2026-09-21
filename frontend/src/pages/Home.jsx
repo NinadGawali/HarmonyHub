@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Music2, Sparkles, Headphones, Radio, Compass } from 'lucide-react';
+import UserMenu from '../components/UserMenu';
 
 export default function Home() {
   const navigate = useNavigate();
@@ -49,6 +50,7 @@ export default function Home() {
           <Link to="/playlists">My Playlists</Link>
           <Link to="/party-room">Party Room</Link>
         </nav>
+        <UserMenu />
       </header>
 
       <section className="discover-hero">

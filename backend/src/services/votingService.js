@@ -62,6 +62,18 @@ const voteSong = async (roomId, songId, userId) => {
 };
 
 // Song ids in the room that the user has already voted for
+const roomExists = async (roomId) => Boolean(await redis.exists(`room:${roomId}`));
+
+const addRoomMember = async (roomId, userId) => {
+  await redis.sAdd(`roomUsers:${roomId}`, userId);
+  await expireWithRoom(roomId, `roomUsers:${roomId}`);
+};
+
+const isRoomHost = async (roomId, userId) => {
+  const hostUserId = await redis.hGet(`room:${roomId}`, 'hostUserId');
+  return Boolean(userId) && hostUserId === userId;
+};
+
 // Delete every key that belongs to a room
 const deleteRoomData = async (roomId) => {
   const [songIds, requestIds] = await Promise.all([
@@ -296,7 +308,8 @@ const getPendingSongRequests = async (roomId) => {
 const approveSongRequest = async (roomId, requestId) => {
   try {
     const request = await redis.hGetAll(`songrequest:${requestId}`);
-    if (!request || !request.requestId) {
+    // A request id from another room is treated as unknown.
+    if (!request?.requestId || request.roomId !== roomId) {
       throw new Error('Song request not found');
     }
 
@@ -330,7 +343,8 @@ const approveSongRequest = async (roomId, requestId) => {
 const rejectSongRequest = async (roomId, requestId) => {
   try {
     const request = await redis.hGetAll(`songrequest:${requestId}`);
-    if (!request || !request.requestId) {
+    // A request id from another room is treated as unknown.
+    if (!request?.requestId || request.roomId !== roomId) {
       throw new Error('Song request not found');
     }
 
@@ -358,6 +372,9 @@ const rejectSongRequest = async (roomId, requestId) => {
 module.exports = {
   VoteError,
   RoomNotFoundError,
+  roomExists,
+  addRoomMember,
+  isRoomHost,
   expireWithRoom,
   deleteRoomData,
   voteSong,

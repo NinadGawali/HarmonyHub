@@ -28,6 +28,10 @@ const addSong = async (req, res) => {
       return res.status(400).json({ error: 'Room ID is required' });
     }
 
+    if (!(await votingService.isRoomHost(roomId, req.user.id))) {
+      return res.status(403).json({ error: 'Only the host can add songs' });
+    }
+
     if (!songData.songId || !songData.title || !songData.artist) {
       return res.status(400).json({ error: 'Song data is incomplete' });
     }
@@ -48,6 +52,10 @@ const removeSong = async (req, res) => {
 
     if (!roomId || !songId) {
       return res.status(400).json({ error: 'Room ID and Song ID are required' });
+    }
+
+    if (!(await votingService.isRoomHost(roomId, req.user.id))) {
+      return res.status(403).json({ error: 'Only the host can remove songs' });
     }
 
     await votingService.removeSongFromRoom(roomId, songId);
