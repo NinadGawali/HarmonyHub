@@ -6,6 +6,9 @@ const spotifyAuthService = require('../services/spotifyAuthService');
 const userService = require('../services/userService');
 const { allowRequest } = require('../utils/rateLimit');
 
+const LOOPBACK_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+const isLoopback = (ip) => LOOPBACK_ADDRESSES.has(ip);
+
 const startSession = async (req, res, user) => {
   // Rotate the session id on every login to prevent session fixation.
   await destroySession(req.sessionId);
@@ -80,7 +83,10 @@ const joinAsGuest = async (req, res, next) => {
       });
     }
 
-    if (!(await allowRequest(`guest:${req.ip}`, config.guestCreationLimitPerHour, 60 * 60))) {
+    // Behind the proxy req.ip is the real client; only requests from this machine itself are
+    // loopback, and limiting those would only lock out local development and tests.
+    if (!isLoopback(req.ip)
+      && !(await allowRequest(`guest:${req.ip}`, config.guestCreationLimitPerHour, 60 * 60))) {
       return res.status(429).json({ error: 'Too many guest sign-ins from this network. Try again later.' });
     }
 
@@ -92,12 +98,10 @@ const joinAsGuest = async (req, res, next) => {
   }
 };
 
-// GET /api/auth/me
+// GET /api/auth/me -> { user } or { user: null }. Being signed out is a normal state, not an error.
 const me = (req, res) => {
-  if (!req.user) {
-    return res.status(401).json({ error: 'Not signed in', code: 'UNAUTHENTICATED' });
-  }
-  return res.json({ user: userService.toPublicUser(req.user) });
+  res.set('Cache-Control', 'no-store');
+  return res.json({ user: req.user ? userService.toPublicUser(req.user) : null });
 };
 
 // POST /api/auth/logout

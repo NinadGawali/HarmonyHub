@@ -1,0 +1,83 @@
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: 0;
+}
+
+.rank {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: var(--color-text-faint);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.rank1 { background: rgba(255, 209, 102, 0.16); color: var(--color-gold); }
+.rank2 { background: rgba(212, 216, 227, 0.14); color: var(--color-silver); }
+.rank3 { background: rgba(224, 160, 122, 0.16); color: var(--color-bronze); }
+
+/* Thin bar under each row showing its share of the leading song's votes */
+.meter {
+  position: absolute;
+  left: var(--space-3);
+  right: var(--space-3);
+  bottom: 4px;
+  height: 2px;
+  border-radius: 1px;
+  background: linear-gradient(to right, var(--color-accent) var(--share), transparent var(--share));
+  opacity: 0.55;
+  transition: background var(--duration-slow) var(--ease-out);
+  pointer-events: none;
+}
+
+.votes {
+  min-width: 2ch;
+  color: var(--color-text-muted);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.voteButton,
+.removeButton {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  transition: background-color var(--duration-fast) ease, color var(--duration-fast) ease, transform var(--duration-fast) ease;
+}
+
+.voteButton {
+  background: var(--color-surface-3);
+  color: var(--color-text);
+}
+
+.voteButton:hover:not(:disabled) {
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
+}
+
+.voteButton:active:not(:disabled) { transform: scale(0.9); }
+
+.voteButton:disabled:not(.voted) { opacity: 0.4; }
+
+.voted {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+  cursor: default;
+}
+
+.removeButton { color: var(--color-text-faint); }
+
+.removeButton:hover {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}

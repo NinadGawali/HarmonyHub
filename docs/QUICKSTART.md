@@ -71,7 +71,8 @@ The health check is at http://127.0.0.1:5173/api/health. It returns `200` when P
 | `npm run doctor` | Check Node, Docker, `.env`, and that Postgres/Redis/recommender are reachable |
 | `npm run dev:deps:down` | Stop Postgres and Redis (data is kept in Docker volumes) |
 | `npm run db:studio` | Browse the database in Prisma Studio |
-| `npm test --prefix backend` | Backend end-to-end tests (needs `dev:deps` running) |
+| `npm test` | Frontend unit tests and backend end-to-end tests (backend needs `dev:deps` running) |
+| `npm run lint` | Lint the frontend (includes React hooks rules) |
 | `docker compose --profile full up -d --build` | Run backend and frontend in containers too |
 
 ## Troubleshooting

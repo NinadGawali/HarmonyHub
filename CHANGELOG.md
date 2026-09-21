@@ -3,6 +3,42 @@
 Each phase of the [refinement plan](docs/REFINEMENT_PLAN.md) ships as a tagged, runnable version.
 Check out any version with `git checkout v<version>`.
 
+## [0.4.0] - 2026-09-21 — Phase 4: frontend redesign
+
+### Changed
+- **The whole frontend has been rebuilt.** It has a new visual design: an ink-and-coral palette, self-hosted
+  Space Grotesk and Inter fonts, design tokens, and CSS Modules. The 3,600-line global stylesheet is gone.
+- New UI building blocks in `components/ui`: Button, Card, text fields, Badge, Tabs, Modal (native
+  `<dialog>`), EmptyState, Spinner and Artwork (with generated fallback art).
+- App shell with a top navigation bar on desktop and a bottom tab bar on phones. Room pages use a focused
+  party header instead.
+- **Home:** hero with a room-code join field, an animated leaderboard preview, feature cards and a
+  "how a party works" section.
+- **Party room (guest):** leaderboard rows slide into their new positions when votes change, with a vote
+  share bar, podium ranks, per-song vote state, a pending spinner, and a request card.
+- **Admin:** stats row, tabs for adding songs and handling requests (with a count badge), an invite modal
+  with a QR code and copyable link, and a voting toggle that waits for the server to confirm.
+- **Create:** AI composer with prompt ideas and a song-count slider, "Add all", a Spotify search tab,
+  and a playlist builder with reordering.
+- **Library and playlist pages:** cover mosaics, play/shuffle/copy link, delete from the library.
+- **One shared playback system** (`usePlayback` + `PlayerBar`) for rooms, the admin panel and playlists.
+  The progress bar keeps moving between Spotify updates. **Party mode** automatically plays the highest-voted
+  song that hasn't been played yet.
+- Routes: `/party`, `/create`, `/library`, `/library/:id`, plus a 404 page. Old paths redirect.
+- Upgraded to Vite 5 and the current lucide icons. Added ESLint (including the React hooks rules) and Vitest.
+
+### Removed
+- **Location-based playlist generation**: the location tracker, `/api/location`, the location recommendation
+  endpoint, the recommender's location mode, and the `user_locations` table (migration included).
+- Broken preview-URL players (Spotify rarely provides preview URLs any more) and other unused components.
+
+### Fixed
+- Logged-out visitors got a 401 console error on every page from `/api/auth/me`. It now returns `{ user: null }`.
+- Running the test suite could lock you out of joining as a guest locally for an hour, because tests used
+  up the per-IP guest limit. Loopback clients are now exempt; proxied clients are still limited by their real IP.
+- The AI endpoint returned made-up "fallback" songs when the recommender was down. It now returns a
+  clear 503 error.
+
 ## [0.3.0] - 2026-09-21 — Phase 3: authentication
 
 ### Added

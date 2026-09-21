@@ -7,7 +7,6 @@ const authRoutes = require('./routes/authRoutes');
 const roomRoutes = require('./routes/roomRoutes');
 const songRoutes = require('./routes/songRoutes');
 const spotifyRoutes = require('./routes/spotifyRoutes');
-const locationRoutes = require('./routes/locationRoutes');
 const playlistRoutes = require('./routes/playlistRoutes');
 
 const app = express();
@@ -35,7 +34,6 @@ app.use('/api/auth', authRoutes);
 app.use('/api/rooms', requireSession, roomRoutes);
 app.use('/api/rooms', requireSession, songRoutes);
 app.use('/api/spotify', requireSpotifyUser, spotifyRoutes);
-app.use('/api/location', requireSession, locationRoutes);
 app.use('/api/playlists', requireSpotifyUser, playlistRoutes);
 
 app.use((req, res) => {

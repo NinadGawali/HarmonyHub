@@ -1,273 +1,100 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
-import { QRCodeSVG } from 'qrcode.react';
-import { ArrowLeft, Music2, Copy, Shuffle, Wifi, WifiOff } from 'lucide-react';
-import SongCard from '../components/SongCard';
-import SideSongPlayer from '../components/SideSongPlayer';
-import { socket } from '../socket/socket';
-import useSpotifyPlayer from '../spotify/hooks/useSpotifyPlayer';
+import React, { useMemo, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import { ArrowLeft, Check, Link2, ListMusic, Play, Shuffle } from 'lucide-react';
+import usePlayback from '../hooks/usePlayback';
+import TrackRow from '../components/TrackRow';
+import PlayerBar from '../components/PlayerBar';
 import { getPlaylistUrl, getStoredPlaylists } from '../utils/playlistStorage';
+import { isPlayableTrack } from '../utils/queue';
+import { ArtworkMosaic, Button, EmptyState } from '../components/ui';
+import styles from './PlaylistDetail.module.css';
 
-export default function PlaylistDetail() {
-  const { playlistId } = useParams();
-  const navigate = useNavigate();
-  const [playlists, setPlaylists] = useState([]);
-  const [selectedSongId, setSelectedSongId] = useState(null);
+function PlaylistView({ playlist }) {
   const [copied, setCopied] = useState(false);
-  const [connected] = useState(socket.connected);
-
-  const {
-    isAuthenticated: spotifyAuthenticated,
-    playerReady: spotifyReady,
-    deviceId: spotifyDeviceId,
-    status: spotifyStatus,
-    playbackState,
-    error: spotifyError,
-    startLogin,
-    initializePlayer,
-    transferPlaybackHere,
-    playTrack,
-    pausePlayback,
-    resumePlayback,
-    seekTo
-  } = useSpotifyPlayer({
-    playerName: `HarmonyHub Playlist ${playlistId}`
+  const playback = usePlayback({
+    songs: playlist.songs,
+    playerName: `HarmonyHub · ${playlist.name}`,
+    returnPath: `/library/${playlist.id}`
   });
+  const playable = playlist.songs.filter(isPlayableTrack);
 
-  useEffect(() => {
-    setPlaylists(getStoredPlaylists());
-  }, []);
-
-  const playlist = useMemo(() => playlists.find((item) => item.id === playlistId), [playlists, playlistId]);
-
-  const ensureSpotifyReady = useCallback(async () => {
-    if (!spotifyAuthenticated) {
-      await startLogin(`/playlists/${playlistId}`);
-      return false;
-    }
-
-    if (!spotifyReady) {
-      await initializePlayer();
-    }
-
-    await transferPlaybackHere(false);
-    return true;
-  }, [initializePlayer, playlistId, spotifyAuthenticated, spotifyReady, startLogin, transferPlaybackHere]);
-
-  const playSongById = useCallback(async (songId) => {
-    if (!songId) {
-      return;
-    }
-
-    const ready = await ensureSpotifyReady();
-    if (!ready) {
-      return;
-    }
-
-    await playTrack(`spotify:track:${songId}`, 0);
-    setSelectedSongId(songId);
-  }, [ensureSpotifyReady, playTrack]);
-
-  const handleTogglePlayPause = async () => {
-    const ready = await ensureSpotifyReady();
-    if (!ready) {
-      return;
-    }
-
-    if (playbackState?.isPaused) {
-      await resumePlayback();
-    } else {
-      await pausePlayback();
-    }
+  const shuffle = () => {
+    const pick = playable[Math.floor(Math.random() * playable.length)];
+    if (pick) playback.play(pick.songId);
   };
 
-  const handleSeek = async (positionMs) => {
-    const ready = await ensureSpotifyReady();
-    if (!ready) {
-      return;
-    }
-
-    await seekTo(positionMs);
-  };
-
-  useEffect(() => {
-    if (!playlist?.songs?.length) {
-      return;
-    }
-
-    if (!selectedSongId) {
-      setSelectedSongId(playlist.songs[0]?.songId || null);
-      return;
-    }
-
-    const stillExists = playlist.songs.some((song) => song.songId === selectedSongId);
-    if (!stillExists) {
-      setSelectedSongId(playlist.songs[0]?.songId || null);
-    }
-  }, [playlist, selectedSongId]);
-
-  if (!playlist) {
-    return (
-      <div className="discover-page">
-        <div className="empty-library-state">
-          <p>Playlist not found.</p>
-          <button className="btn-primary" onClick={() => navigate('/playlists')}>
-            Back to playlists
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  const playlistUrl = getPlaylistUrl(playlist.id);
-  const poster = playlist.songs.find((song) => song.image)?.image;
-
-  const handleCopyLink = async () => {
+  const copyLink = async () => {
     try {
-      await navigator.clipboard.writeText(playlistUrl);
+      await navigator.clipboard.writeText(getPlaylistUrl(playlist.id));
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    } catch (_error) {
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
       setCopied(false);
     }
   };
 
-  const handleShufflePick = () => {
-    if (!playlist.songs.length) {
-      return;
-    }
-
-    const randomSong = playlist.songs[Math.floor(Math.random() * playlist.songs.length)];
-    playSongById(randomSong.songId);
-  };
-
   return (
-    <div className="discover-page playlist-detail-page">
-      <header className="discover-nav">
-        <div className="brand-mark">
-          <Music2 size={24} />
-          <span>HarmonyHub</span>
+    <div className="container">
+      <Button to="/library" variant="ghost" size="sm" icon={ArrowLeft} className={styles.back}>Library</Button>
+
+      <header className={styles.hero}>
+        <ArtworkMosaic tracks={playlist.songs} seed={playlist.name} size={200} />
+        <div className={styles.heroText}>
+          <span className={styles.kicker}>Playlist</span>
+          <h1 className={styles.title}>{playlist.name}</h1>
+          <p className={styles.meta}>
+            {playlist.songs.length} songs
+            {playable.length < playlist.songs.length && ` · ${playlist.songs.length - playable.length} not on Spotify`}
+          </p>
+          <div className={styles.actions}>
+            <Button size="lg" icon={Play} onClick={() => playable[0] && playback.play(playable[0].songId)} disabled={!playable.length}>
+              Play
+            </Button>
+            <Button size="lg" variant="secondary" icon={Shuffle} onClick={shuffle} disabled={!playable.length}>Shuffle</Button>
+            <Button size="lg" variant="ghost" icon={copied ? Check : Link2} onClick={copyLink}>
+              {copied ? 'Copied' : 'Copy link'}
+            </Button>
+          </div>
         </div>
-        <nav>
-          <Link to="/">Home</Link>
-          <Link to="/playlists">My Playlists</Link>
-          <Link to="/party-room">Party Room</Link>
-        </nav>
       </header>
 
-      <section className="library-hero playlist-detail-hero">
-        <button className="btn-secondary" onClick={() => navigate('/playlists')}>
-          <ArrowLeft size={16} />
-          <span>Back to library</span>
-        </button>
+      <ol className={styles.tracks}>
+        {playlist.songs.map((song, index) => {
+          const canPlay = isPlayableTrack(song);
+          return (
+            <TrackRow
+              key={song.songId}
+              song={song}
+              detail={canPlay ? song.album : 'AI suggestion, not matched to Spotify yet'}
+              active={song.songId === playback.currentId}
+              onSelect={canPlay ? () => playback.play(song.songId) : undefined}
+              leading={<span className={styles.position}>{index + 1}</span>}
+            />
+          );
+        })}
+      </ol>
 
-        <div className="playlist-detail-banner">
-          <div className="playlist-detail-poster">
-            {poster ? <img src={poster} alt={playlist.name} /> : <Music2 size={48} />}
-          </div>
-          <div className="playlist-detail-meta">
-            <p className="playlist-kicker">Your playlist</p>
-            <h1>{playlist.name}</h1>
-            <p>{playlist.songs.length} songs ready to play one by one.</p>
-            <div className="playlist-detail-actions">
-              <button className="btn-primary" onClick={handleShufflePick}>
-                <Shuffle size={16} />
-                <span>Shuffle play</span>
-              </button>
-              <button className="btn-secondary" onClick={handleCopyLink}>
-                <Copy size={16} />
-                <span>{copied ? 'Link copied' : 'Copy link'}</span>
-              </button>
-            </div>
-          </div>
-          <div className="playlist-detail-qr">
-            <QRCodeSVG value={playlistUrl} size={170} level="H" includeMargin bgColor="#ffffff" fgColor="#000000" />
-            <p>Share this QR with others</p>
-          </div>
-        </div>
-      </section>
-
-      <section className="music-player-section">
-        <h2 className="player-heading">Playlist Playback</h2>
-        <p className="player-subtext">This uses the same client-side Spotify playback flow as joined room users.</p>
-        <div className="room-main-grid playlist-playback-grid">
-          <div className="room-main-leaderboard playlist-leaderboard-panel">
-            <div className="playlist-client-status">
-              <span className={`status-badge ${connected ? 'connected' : 'disconnected'}`}>
-                {connected ? <Wifi size={16} /> : <WifiOff size={16} />}
-                {connected ? 'Connected' : 'Disconnected'}
-              </span>
-              <span className="playlist-client-note">Client-side playback with Spotify SDK</span>
-            </div>
-
-            <div className="playlist-track-grid">
-              {playlist.songs.map((song, index) => (
-                <SongCard
-                  key={song.songId}
-                  song={song}
-                  rank={index + 1}
-                  showVoteButton={false}
-                  onSelectSong={() => playSongById(song.songId)}
-                  isActive={song.songId === selectedSongId}
-                />
-              ))}
-            </div>
-          </div>
-
-          <SideSongPlayer
-            songs={playlist.songs}
-            selectedSongId={selectedSongId}
-            spotifyReady={spotifyReady}
-            spotifyAuthenticated={spotifyAuthenticated}
-            spotifyStatus={spotifyStatus}
-            spotifyDeviceId={spotifyDeviceId}
-            spotifyError={spotifyError}
-            playbackState={playbackState}
-            onConnectSpotify={async () => {
-              try {
-                await ensureSpotifyReady();
-              } catch (_error) {
-                // handled by hook state
-              }
-            }}
-            onTogglePlayPause={handleTogglePlayPause}
-            onSeek={handleSeek}
-            onPrev={() => {
-              if (!playlist.songs.length || !selectedSongId) return;
-              const currentIndex = playlist.songs.findIndex((song) => song.songId === selectedSongId);
-              const previousSong = playlist.songs[currentIndex - 1];
-              if (previousSong) {
-                playSongById(previousSong.songId);
-              }
-            }}
-            onNext={() => {
-              if (!playlist.songs.length || !selectedSongId) return;
-              const currentIndex = playlist.songs.findIndex((song) => song.songId === selectedSongId);
-              const nextSong = playlist.songs[currentIndex + 1];
-              if (nextSong) {
-                playSongById(nextSong.songId);
-              }
-            }}
-            canGoPrev={playlist.songs.findIndex((song) => song.songId === selectedSongId) > 0}
-            canGoNext={playlist.songs.findIndex((song) => song.songId === selectedSongId) >= 0 && playlist.songs.findIndex((song) => song.songId === selectedSongId) < playlist.songs.length - 1}
-            currentIndex={Math.max(playlist.songs.findIndex((song) => song.songId === selectedSongId), 0)}
-            totalSongs={playlist.songs.length}
-          />
-        </div>
-      </section>
-
-      <section className="playlist-track-grid">
-        {playlist.songs.map((song, index) => (
-          <SongCard
-            key={song.songId}
-            song={song}
-            rank={index + 1}
-            showVoteButton={false}
-            onSelectSong={() => setSelectedSongId(song.songId)}
-            isActive={song.songId === selectedSongId}
-          />
-        ))}
-      </section>
+      <PlayerBar playback={playback} label="Playing from this playlist" />
     </div>
   );
+}
+
+export default function PlaylistDetail() {
+  const { playlistId } = useParams();
+  const playlist = useMemo(() => getStoredPlaylists().find((item) => item.id === playlistId), [playlistId]);
+
+  if (!playlist) {
+    return (
+      <div className="container">
+        <EmptyState
+          icon={ListMusic}
+          title="Playlist not found"
+          description="Playlists are saved in the browser where they were created."
+          action={<Button to="/library" variant="secondary">Back to library</Button>}
+        />
+      </div>
+    );
+  }
+
+  return <PlaylistView playlist={playlist} />;
 }

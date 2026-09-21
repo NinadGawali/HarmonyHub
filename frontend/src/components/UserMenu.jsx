@@ -1,36 +1,31 @@
 import React from 'react';
-import { LogIn, LogOut, User } from 'lucide-react';
+import { LogOut } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
+import { Artwork, Button } from './ui';
+import styles from './UserMenu.module.css';
 
 // Signed-in user chip with logout, or a Spotify login button.
 export default function UserMenu() {
   const { user, loading, loginWithSpotify, logout } = useAuth();
 
   if (loading) {
-    return null;
+    return <span className={styles.placeholder} aria-hidden="true" />;
   }
 
   if (!user) {
     return (
-      <button className="user-menu-login" onClick={() => loginWithSpotify()}>
-        <LogIn size={16} />
-        <span>Log in with Spotify</span>
-      </button>
+      <Button variant="secondary" size="sm" onClick={() => loginWithSpotify()}>
+        Log in
+      </Button>
     );
   }
 
   return (
-    <div className="user-menu">
-      {user.avatarUrl ? (
-        <img className="user-menu-avatar" src={user.avatarUrl} alt="" />
-      ) : (
-        <span className="user-menu-avatar user-menu-avatar-fallback"><User size={14} /></span>
-      )}
-      <span className="user-menu-name">
-        {user.displayName}
-        {user.isGuest && <span className="user-menu-tag">guest</span>}
-      </span>
-      <button className="user-menu-logout" onClick={logout} aria-label="Log out" title="Log out">
+    <div className={styles.menu}>
+      <Artwork src={user.avatarUrl} seed={user.displayName} size={28} radius="lg" className={styles.avatar} />
+      <span className={styles.name} title={user.displayName}>{user.displayName}</span>
+      {user.isGuest && <span className={styles.tag}>guest</span>}
+      <button type="button" className={styles.logout} onClick={logout} aria-label="Log out" title="Log out">
         <LogOut size={16} />
       </button>
     </div>

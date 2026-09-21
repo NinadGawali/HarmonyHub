@@ -1,746 +1,250 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { playlistAPI, locationAPI, spotifyAPI } from '../api/api';
-import { Music2, Wand2, Plus, Save, Trash2, Home, Search, Play, Pause, SkipBack, SkipForward, Shuffle, Repeat } from 'lucide-react';
-import { createPlaylistRecord, getStoredPlaylists, saveStoredPlaylists } from '../utils/playlistStorage';
-import PulseVisualizer from '../components/PulseVisualizer';
+import { ArrowDown, ArrowUp, Check, ListPlus, Plus, Save, Search, Sparkles, Trash2, Wand2 } from 'lucide-react';
+import { playlistAPI } from '../api/api';
+import { createPlaylistRecord, addStoredPlaylist } from '../utils/playlistStorage';
+import TrackRow from '../components/TrackRow';
+import SpotifySearch from '../components/SpotifySearch';
+import { useToast } from '../components/Toast';
+import { Badge, Button, Card, CardHeader, EmptyState, TabPanel, Tabs, TextArea, TextInput } from '../components/ui';
+import styles from './CreatePlaylist.module.css';
+
+const TAB_PREFIX = 'create';
+const PROMPT_IDEAS = [
+  'Late-night drive with synthwave and dream pop',
+  'Sunday morning acoustic coffee',
+  'High-energy workout hip-hop',
+  'Bollywood wedding dance floor',
+  'Rainy day lo-fi to focus'
+];
+
+function Composer({ onGenerated }) {
+  const [prompt, setPrompt] = useState('');
+  const [artist, setArtist] = useState('');
+  const [count, setCount] = useState(10);
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState('');
+
+  const generate = async (event) => {
+    event.preventDefault();
+    if (!prompt.trim()) {
+      setError('Describe the playlist you want.');
+      return;
+    }
+
+    setGenerating(true);
+    setError('');
+    try {
+      const { data } = await playlistAPI.generateRecommendations({ description: prompt.trim(), artist: artist.trim(), count });
+      onGenerated({ prompt: prompt.trim(), ...data });
+    } catch (err) {
+      setError(err.response?.data?.error || 'Could not generate recommendations. Please try again.');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  return (
+    <form className={styles.composer} onSubmit={generate}>
+      <TextArea
+        label="Describe the vibe"
+        placeholder="e.g. upbeat late-night drive with synth-pop and a little indie rock"
+        value={prompt}
+        onChange={(event) => setPrompt(event.target.value)}
+        maxLength={500}
+        rows={3}
+        error={error}
+      />
+      <div className={styles.ideas} aria-label="Prompt ideas">
+        {PROMPT_IDEAS.map((idea) => (
+          <button key={idea} type="button" className={styles.idea} onClick={() => setPrompt(idea)}>{idea}</button>
+        ))}
+      </div>
+      <div className={styles.composerRow}>
+        <TextInput
+          label="Artist to lean on (optional)"
+          placeholder="e.g. The Weeknd"
+          value={artist}
+          onChange={(event) => setArtist(event.target.value)}
+          maxLength={100}
+        />
+        <div className={styles.countField}>
+          <label htmlFor="song-count" className={styles.countLabel}>
+            Songs <span className={styles.countValue}>{count}</span>
+          </label>
+          <input
+            id="song-count"
+            type="range"
+            min={4}
+            max={15}
+            value={count}
+            onChange={(event) => setCount(Number(event.target.value))}
+            className={styles.range}
+            style={{ '--fill': `${((count - 4) / 11) * 100}%` }}
+          />
+        </div>
+      </div>
+      <Button type="submit" size="lg" icon={Wand2} loading={generating}>
+        {generating ? 'Generating...' : 'Generate with AI'}
+      </Button>
+    </form>
+  );
+}
+
+function Suggestions({ result, isAdded, onAdd, onAddAll }) {
+  const remaining = result.songs.filter((song) => !isAdded(song.songId));
+
+  return (
+    <div className={styles.suggestions}>
+      <div className={styles.aiMessage}>
+        <Sparkles size={18} className={styles.aiIcon} aria-hidden="true" />
+        <div>
+          <p className={styles.aiPrompt}>&ldquo;{result.prompt}&rdquo;</p>
+          <p>{result.message}</p>
+          {result.usedFallback && (
+            <Badge tone="warning" className={styles.fallbackBadge}>AI unavailable: placeholder suggestions</Badge>
+          )}
+        </div>
+      </div>
+
+      <div className={styles.suggestionsHeader}>
+        <span>{result.songs.length} suggestions</span>
+        <Button size="sm" variant="secondary" icon={ListPlus} onClick={onAddAll} disabled={!remaining.length}>
+          Add all
+        </Button>
+      </div>
+
+      <ul className={styles.trackList}>
+        {result.songs.map((song) => {
+          const added = isAdded(song.songId);
+          return (
+            <TrackRow
+              key={song.songId}
+              song={song}
+              detail={song.reason}
+              trailing={(
+                <button
+                  type="button"
+                  className={`${styles.roundButton} ${added ? styles.added : ''}`}
+                  onClick={() => onAdd(song)}
+                  disabled={added}
+                  aria-label={added ? `${song.title} is in your playlist` : `Add ${song.title}`}
+                >
+                  {added ? <Check size={18} /> : <Plus size={18} />}
+                </button>
+              )}
+            />
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function PlaylistBuilder({ songs, onRemove, onMove, onSave }) {
+  const [name, setName] = useState('');
+
+  const save = (event) => {
+    event.preventDefault();
+    onSave(name.trim() || 'My playlist');
+  };
+
+  return (
+    <Card as="aside" className={styles.builder}>
+      <CardHeader icon={ListPlus} title="Your playlist" subtitle={`${songs.length} ${songs.length === 1 ? 'song' : 'songs'}`} />
+      <form onSubmit={save} className={styles.saveForm}>
+        <TextInput label="Playlist name" hideLabel placeholder="Name your playlist" value={name} onChange={(event) => setName(event.target.value)} maxLength={80} />
+        <Button type="submit" icon={Save} disabled={!songs.length}>Save</Button>
+      </form>
+
+      {songs.length === 0 ? (
+        <EmptyState compact icon={ListPlus} title="Empty for now" description="Add songs from AI suggestions or search." />
+      ) : (
+        <ol className={styles.trackList}>
+          {songs.map((song, index) => (
+            <TrackRow
+              key={song.songId}
+              song={song}
+              leading={<span className={styles.position}>{index + 1}</span>}
+              trailing={(
+                <>
+                  <button type="button" className={styles.iconButton} onClick={() => onMove(index, -1)} disabled={index === 0} aria-label={`Move ${song.title} up`}>
+                    <ArrowUp size={16} />
+                  </button>
+                  <button type="button" className={styles.iconButton} onClick={() => onMove(index, 1)} disabled={index === songs.length - 1} aria-label={`Move ${song.title} down`}>
+                    <ArrowDown size={16} />
+                  </button>
+                  <button type="button" className={`${styles.iconButton} ${styles.remove}`} onClick={() => onRemove(song.songId)} aria-label={`Remove ${song.title}`}>
+                    <Trash2 size={16} />
+                  </button>
+                </>
+              )}
+            />
+          ))}
+        </ol>
+      )}
+    </Card>
+  );
+}
 
 export default function CreatePlaylist() {
   const navigate = useNavigate();
-  const [description, setDescription] = useState('');
-  const [artist, setArtist] = useState('');
-  const [count, setCount] = useState(8);
-  const [playlistName, setPlaylistName] = useState('My AI Playlist');
-  const [chatMessages, setChatMessages] = useState([]);
-  const [latestSuggestedSongs, setLatestSuggestedSongs] = useState([]);
-  const [selectedSuggestionIds, setSelectedSuggestionIds] = useState([]);
-  const [aiRecommendations, setAiRecommendations] = useState([]);
-  const [regionalRecommendations, setRegionalRecommendations] = useState([]);
-  const [regionName, setRegionName] = useState('');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState([]);
-  const [searching, setSearching] = useState(false);
-  const [selectedSongs, setSelectedSongs] = useState([]);
-  const [savedPlaylists, setSavedPlaylists] = useState([]);
-  const [shuffleEnabled, setShuffleEnabled] = useState(false);
-  const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [progressSec, setProgressSec] = useState(0);
-  const [durationSec, setDurationSec] = useState(0);
-  const [queueOrder, setQueueOrder] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [generationMode, setGenerationMode] = useState('ai');
-  const [error, setError] = useState('');
-  const audioRef = useRef(null);
+  const toast = useToast();
+  const [tab, setTab] = useState('ai');
+  const [result, setResult] = useState(null);
+  const [playlist, setPlaylist] = useState([]);
 
-  const commandSeed = useMemo(() => `${description.trim()}|${artist.trim()}|${count}|${generationMode}`, [artist, count, description, generationMode]);
-  const commandVariant = useMemo(() => {
-    const text = `${description} ${artist}`.toLowerCase();
-    if (/ambient|chill|lofi|downtempo/.test(text)) return 'calm';
-    if (/house|dance|club|party|electro|edm|techno/.test(text)) return 'burst';
-    if (/rock|indie|alt|garage|punk/.test(text)) return 'pulse';
-    return generationMode === 'location' ? 'wave' : 'pulse';
-  }, [artist, description, generationMode]);
+  const isAdded = (songId) => playlist.some((song) => song.songId === songId);
+  const addSong = (song) => setPlaylist((current) => (current.some((item) => item.songId === song.songId) ? current : [...current, song]));
+  const addAll = () => result.songs.forEach(addSong);
+  const removeSong = (songId) => setPlaylist((current) => current.filter((song) => song.songId !== songId));
+  const moveSong = (index, direction) => setPlaylist((current) => {
+    const next = [...current];
+    const target = index + direction;
+    [next[index], next[target]] = [next[target], next[index]];
+    return next;
+  });
 
-  useEffect(() => {
-    setSavedPlaylists(getStoredPlaylists());
-  }, []);
-
-  const persistPlaylists = (items) => {
-    setSavedPlaylists(items);
-    saveStoredPlaylists(items);
+  const save = (name) => {
+    const record = createPlaylistRecord({ name, songs: playlist });
+    addStoredPlaylist(record);
+    toast.success(`Saved "${name}"`);
+    navigate(`/library/${record.id}`);
   };
-
-  const getLatestLocation = async () => {
-    try {
-      const response = await locationAPI.getLatest();
-      return response?.data?.location || null;
-    } catch (_error) {
-      return null;
-    }
-  };
-
-  const handleGenerateByType = async (mode) => {
-    setError('');
-
-    if (mode === 'ai' && !description.trim()) {
-      setError('Please describe the type of songs you want.');
-      return;
-    }
-
-    setLoading(true);
-    setGenerationMode(mode);
-
-    try {
-      let location = null;
-      if (mode === 'location') {
-        const latestLocation = await getLatestLocation();
-        const state = latestLocation?.state ? String(latestLocation.state).trim() : '';
-
-        if (!state) {
-          setError('Location-based recommendations require your state. Please allow location once and retry.');
-          return;
-        }
-
-        location = { state };
-      }
-
-      const payload = {
-        description: description.trim(),
-        artist: artist.trim(),
-        count: Number(count),
-        location
-      };
-
-      const response = mode === 'location'
-        ? await playlistAPI.generateLocationRecommendations(payload)
-        : await playlistAPI.generateAIRecommendations(payload);
-
-      const mergedRecommendations = response.data.recommendations || [];
-      setAiRecommendations(response.data.aiRecommendations || []);
-      setRegionalRecommendations(response.data.regionalRecommendations || []);
-      setRegionName(response.data.regionName || 'Your Region');
-      setLatestSuggestedSongs(mergedRecommendations);
-      setSelectedSuggestionIds([]);
-      setChatMessages((prev) => [
-        ...prev,
-        {
-          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          prompt: mode === 'location' ? `Location-based request${description.trim() ? `: ${description.trim()}` : ''}` : description.trim(),
-          response: response.data.chatResponse || 'Here are your recommendations.',
-          songs: mergedRecommendations,
-          locationLabel: response.data.regionName || ''
-        }
-      ]);
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to generate recommendations');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleGenerateAI = (e) => {
-    e.preventDefault();
-    handleGenerateByType('ai');
-  };
-
-  const handleGenerateLocation = (e) => {
-    e.preventDefault();
-    handleGenerateByType('location');
-  };
-
-  const selectedSongIds = new Set(selectedSongs.map((song) => song.songId));
-
-  const addSong = (song) => {
-    if (selectedSongIds.has(song.songId)) {
-      return;
-    }
-
-    setSelectedSongs((prev) => [...prev, song]);
-  };
-
-  const addSongAndFocus = (song) => {
-    addSong(song);
-    setError('');
-  };
-
-  const toggleSuggestionSelection = (songId) => {
-    setSelectedSuggestionIds((prev) => {
-      if (prev.includes(songId)) {
-        return prev.filter((id) => id !== songId);
-      }
-
-      return [...prev, songId];
-    });
-  };
-
-  const toggleSelectAllSuggestions = () => {
-    if (!latestSuggestedSongs.length) {
-      return;
-    }
-
-    if (selectedSuggestionIds.length === latestSuggestedSongs.length) {
-      setSelectedSuggestionIds([]);
-      return;
-    }
-
-    setSelectedSuggestionIds(latestSuggestedSongs.map((song) => song.songId));
-  };
-
-  const addSelectedSuggestionsToPlaylist = () => {
-    if (!selectedSuggestionIds.length) {
-      setError('Select songs from the AI response first.');
-      return;
-    }
-
-    const selectedMap = new Set(selectedSuggestionIds);
-    const songsToAdd = latestSuggestedSongs.filter((song) => selectedMap.has(song.songId));
-    const uniqueSongs = songsToAdd.filter((song) => !selectedSongIds.has(song.songId));
-
-    if (!uniqueSongs.length) {
-      setError('Selected songs are already in your playlist.');
-      return;
-    }
-
-    setSelectedSongs((prev) => [...prev, ...uniqueSongs]);
-    setError('');
-  };
-
-  useEffect(() => {
-    if (!audioRef.current) {
-      return;
-    }
-
-    audioRef.current.volume = 0.85;
-  }, []);
-
-  useEffect(() => {
-    if (!selectedSongs.length) {
-      setQueueOrder([]);
-      setCurrentTrackIndex(0);
-      setIsPlaying(false);
-      return;
-    }
-
-    const ordered = [...selectedSongs];
-
-    if (shuffleEnabled) {
-      for (let index = ordered.length - 1; index > 0; index -= 1) {
-        const randomIndex = Math.floor(Math.random() * (index + 1));
-        [ordered[index], ordered[randomIndex]] = [ordered[randomIndex], ordered[index]];
-      }
-    }
-
-    setQueueOrder(ordered);
-    setCurrentTrackIndex((previousIndex) => Math.min(previousIndex, ordered.length - 1));
-  }, [selectedSongs, shuffleEnabled]);
-
-  const currentPlayingSong = queueOrder[currentTrackIndex] || null;
-
-  const formatTime = useCallback((seconds) => {
-    const safeSeconds = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
-    const mins = Math.floor(safeSeconds / 60);
-    const secs = safeSeconds % 60;
-    return `${mins}:${String(secs).padStart(2, '0')}`;
-  }, []);
-
-  useEffect(() => {
-    setProgressSec(0);
-    setDurationSec(0);
-    setIsPlaying(false);
-  }, [currentPlayingSong?.songId]);
-
-  const handleSearchSongs = async (e) => {
-    e.preventDefault();
-    setError('');
-
-    if (!searchQuery.trim()) {
-      return;
-    }
-
-    setSearching(true);
-
-    try {
-      const response = await spotifyAPI.search(searchQuery.trim());
-      setSearchResults(response.data.songs || []);
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to search songs');
-    } finally {
-      setSearching(false);
-    }
-  };
-
-  const clearSearch = () => {
-    setSearchQuery('');
-    setSearchResults([]);
-  };
-
-  const syncAudioToTrack = useCallback((track, startAtSec = 0) => {
-    if (!audioRef.current || !track?.previewUrl) {
-      return;
-    }
-
-    audioRef.current.pause();
-    audioRef.current.src = track.previewUrl;
-    audioRef.current.currentTime = Math.max(0, startAtSec);
-    audioRef.current.load();
-  }, []);
-
-  useEffect(() => {
-    if (!currentPlayingSong?.previewUrl) {
-      return;
-    }
-
-    syncAudioToTrack(currentPlayingSong, 0);
-  }, [currentPlayingSong, syncAudioToTrack]);
-
-  const goToTrack = (nextIndex) => {
-    if (!queueOrder.length) {
-      return;
-    }
-
-    const boundedIndex = Math.max(0, Math.min(nextIndex, queueOrder.length - 1));
-    setCurrentTrackIndex(boundedIndex);
-    setProgressSec(0);
-    setIsPlaying(true);
-  };
-
-  const playCurrent = () => {
-    if (!currentPlayingSong?.previewUrl || !audioRef.current) {
-      setError('This song does not have a preview URL to play.');
-      return;
-    }
-
-    setError('');
-    audioRef.current.play().catch(() => {
-      setError('Unable to play this preview in the browser.');
-    });
-    setIsPlaying(true);
-  };
-
-  const pauseCurrent = () => {
-    if (!audioRef.current) {
-      return;
-    }
-
-    audioRef.current.pause();
-    setIsPlaying(false);
-  };
-
-  const togglePlayPause = () => {
-    if (isPlaying) {
-      pauseCurrent();
-    } else {
-      playCurrent();
-    }
-  };
-
-  const handleNextTrack = () => {
-    if (currentTrackIndex >= queueOrder.length - 1) {
-      setIsPlaying(false);
-      return;
-    }
-
-    goToTrack(currentTrackIndex + 1);
-  };
-
-  const handlePrevTrack = () => {
-    if (currentTrackIndex <= 0) {
-      return;
-    }
-
-    goToTrack(currentTrackIndex - 1);
-  };
-
-  const handleTrackEnded = () => {
-    handleNextTrack();
-  };
-
-  const handleSeek = (event) => {
-    const nextTime = Number(event.target.value);
-    if (!audioRef.current) {
-      return;
-    }
-
-    audioRef.current.currentTime = nextTime;
-    setProgressSec(nextTime);
-  };
-
-  const handleShuffleToggle = () => {
-    setShuffleEnabled((prev) => !prev);
-    setCurrentTrackIndex(0);
-  };
-
-  const handleRepeatToggle = () => {
-    if (!audioRef.current) {
-      return;
-    }
-
-    audioRef.current.loop = !audioRef.current.loop;
-  };
-
-  const removeSong = (songId) => {
-    setSelectedSongs((prev) => prev.filter((song) => song.songId !== songId));
-  };
-
-  const savePlaylist = () => {
-    if (!playlistName.trim()) {
-      setError('Please enter a playlist name before saving.');
-      return;
-    }
-
-    if (selectedSongs.length === 0) {
-      setError('Add at least one song to save the playlist.');
-      return;
-    }
-
-    const next = [createPlaylistRecord({ name: playlistName.trim(), songs: selectedSongs }), ...savedPlaylists];
-
-    persistPlaylists(next);
-    const createdPlaylist = next[0];
-    setPlaylistName('My AI Playlist');
-    setSelectedSongs([]);
-    setError('');
-    navigate(`/playlists/${createdPlaylist.id}`);
-  };
-
-  const deletePlaylist = (playlistId) => {
-    persistPlaylists(savedPlaylists.filter((item) => item.id !== playlistId));
-  };
-
-  const RecommendationList = ({ title, songs, emptyLabel }) => (
-    <section className="recommendation-list">
-      <h3>{title}</h3>
-      {songs.length === 0 ? (
-        <p className="empty-copy">{emptyLabel}</p>
-      ) : (
-        songs.map((song) => (
-          <article key={`${title}-${song.songId}`} className="recommendation-item">
-            <div>
-              <p className="song-title">{song.title}</p>
-              <p className="song-meta">{song.artist}</p>
-              {song.reason && <p className="song-reason">{song.reason}</p>}
-            </div>
-            <button type="button" className="btn-add" onClick={() => addSongAndFocus(song)}>
-              <Plus size={16} />
-            </button>
-          </article>
-        ))
-      )}
-    </section>
-  );
 
   return (
-    <div className="create-playlist-page">
-      <header className="create-playlist-header">
-        <div className="brand-mark">
-          <Music2 size={22} />
-          <span>HarmonyHub</span>
-        </div>
-        <div className="create-header-actions">
-          <button className="btn-secondary" onClick={() => navigate('/')}>
-            <Home size={16} />
-            <span>Home</span>
-          </button>
-          <button className="btn-secondary" onClick={() => navigate('/playlists')}>
-            My Playlists
-          </button>
-          <button className="btn-secondary" onClick={() => navigate('/party-room')}>
-            Party Room
-          </button>
-        </div>
+    <div className="container">
+      <header className={styles.header}>
+        <h1 className={styles.title}>Create a playlist</h1>
+        <p className={styles.subtitle}>Describe a mood and let AI suggest songs, or search Spotify yourself.</p>
       </header>
 
-      <main className="create-playlist-grid">
-        <section className="generator-panel">
-          <h1>Create Playlist With AI</h1>
-          <p>Describe your mood, style, and artists. Add recommended songs to build your playlist.</p>
-
-          <div className="ai-hero-strip">
-            <div className="ai-hero-copy">
-              <span className="section-pill">AI Command Center</span>
-              <h2>{generationMode === 'location' ? 'State-driven music discovery' : 'Prompt-driven playlist generation'}</h2>
-              <p>
-                {generationMode === 'location'
-                  ? 'Captured once, then reused. The experience now leans into your state with subtle animated regional energy.'
-                  : 'Use your mood and favorite artist to steer a live visual composition that reacts on the client only.'}
-              </p>
-            </div>
-            <PulseVisualizer seed={commandSeed} variant={commandVariant} />
-          </div>
-
-          <form onSubmit={handleGenerateAI} className="generator-form">
-            <textarea
-              rows={4}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Example: upbeat late-night drive tracks with synth-pop and a little indie rock"
-            />
-            <input
-              type="text"
-              value={artist}
-              onChange={(e) => setArtist(e.target.value)}
-              placeholder="Preferred artist (optional)"
-            />
-            <input
-              type="number"
-              min={4}
-              max={15}
-              value={count}
-              onChange={(e) => setCount(Number(e.target.value))}
-            />
-            <div className="generator-actions-row">
-              <button className="btn-primary" type="button" disabled={loading} onClick={handleGenerateAI}>
-                <Wand2 size={16} />
-                <span>{loading && generationMode === 'ai' ? 'Generating AI...' : 'Generate AI Playlist'}</span>
-              </button>
-              <button className="btn-secondary" type="button" disabled={loading} onClick={handleGenerateLocation}>
-                <Wand2 size={16} />
-                <span>{loading && generationMode === 'location' ? 'Generating Location...' : 'Generate Location Playlist'}</span>
-              </button>
-            </div>
-          </form>
-
-          {loading && (
-            <div className="ai-loading-panel">
-              <div className="ai-loading-header">
-                <span className="section-pill">Composing response</span>
-                <span className="ai-loading-note">Frontend-only animated preview</span>
-              </div>
-              <PulseVisualizer seed={commandSeed} variant={generationMode === 'location' ? 'wave' : commandVariant} bars={10} />
-              <div className="ai-loading-bars">
-                <span />
-                <span />
-                <span />
-                <span />
-              </div>
-            </div>
+      <div className={styles.grid}>
+        <Card className={styles.workspace}>
+          <Tabs
+            idPrefix={TAB_PREFIX}
+            label="Ways to add songs"
+            active={tab}
+            onChange={setTab}
+            tabs={[
+              { id: 'ai', label: 'AI suggestions', icon: Sparkles },
+              { id: 'search', label: 'Search Spotify', icon: Search }
+            ]}
+          />
+          {tab === 'ai' ? (
+            <TabPanel id="ai" idPrefix={TAB_PREFIX}>
+              <Composer onGenerated={setResult} />
+              {result && <Suggestions result={result} isAdded={isAdded} onAdd={addSong} onAddAll={addAll} />}
+            </TabPanel>
+          ) : (
+            <TabPanel id="search" idPrefix={TAB_PREFIX}>
+              <SpotifySearch onAdd={addSong} isAdded={isAdded} />
+            </TabPanel>
           )}
+        </Card>
 
-          {error && <p className="error-message">{error}</p>}
-
-          <section className="chat-window-panel">
-            <div className="section-title-row">
-              <h2>AI Chat Window</h2>
-              <span>Prompt and response with selectable songs</span>
-            </div>
-
-            {chatMessages.length === 0 ? (
-              <p className="empty-copy">Send a prompt to see recommendations in chat format.</p>
-            ) : (
-              <div className="chat-window-list">
-                {chatMessages.map((message, index) => (
-                  <article key={message.id} className="chat-message-block">
-                    <div className="chat-bubble chat-bubble-user">
-                      <p>{message.prompt}</p>
-                    </div>
-                    <div className="chat-bubble chat-bubble-ai">
-                      <p>{message.response}</p>
-                      {message.locationLabel && <p className="song-reason">Location: {message.locationLabel}</p>}
-                    </div>
-
-                    {index === chatMessages.length - 1 && message.songs.length > 0 && (
-                      <div className="chat-song-selection">
-                        <div className="chat-selection-actions">
-                          <button type="button" className="btn-secondary" onClick={toggleSelectAllSuggestions}>
-                            {selectedSuggestionIds.length === latestSuggestedSongs.length ? 'Clear Selection' : 'Select All'}
-                          </button>
-                          <button type="button" className="btn-primary" onClick={addSelectedSuggestionsToPlaylist}>
-                            <Plus size={16} />
-                            <span>Auto Add Selected Songs</span>
-                          </button>
-                        </div>
-
-                        {message.songs.map((song) => (
-                          <label key={`chat-song-${song.songId}`} className="chat-song-row">
-                            <input
-                              type="checkbox"
-                              checked={selectedSuggestionIds.includes(song.songId)}
-                              onChange={() => toggleSuggestionSelection(song.songId)}
-                            />
-                            <div>
-                              <p className="song-title">{song.title}</p>
-                              <p className="song-meta">{song.artist}</p>
-                              {song.reason && <p className="song-reason">{song.reason}</p>}
-                            </div>
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                  </article>
-                ))}
-              </div>
-            )}
-          </section>
-
-          <div className="recommendations-wrapper">
-            <RecommendationList
-              title="AI Recommendations"
-              songs={aiRecommendations}
-              emptyLabel="No songs yet. Generate to begin."
-            />
-            <RecommendationList
-              title={regionName ? `${regionName} Picks` : 'Regional Picks'}
-              songs={regionalRecommendations}
-              emptyLabel="Regional suggestions appear after generation and location capture."
-            />
-          </div>
-
-          <div className="manual-search-panel">
-            <div className="section-title-row">
-              <h2>Manual Search</h2>
-              <span>Search Spotify and build your own playlist</span>
-            </div>
-
-            <form onSubmit={handleSearchSongs} className="manual-search-form">
-              <div className="search-input-group">
-                <Search size={18} />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search by song or artist"
-                />
-                {searchQuery && (
-                  <button type="button" className="clear-button" onClick={clearSearch}>
-                    <Trash2 size={14} />
-                  </button>
-                )}
-              </div>
-              <button className="btn-primary" type="submit" disabled={searching}>
-                <Search size={16} />
-                <span>{searching ? 'Searching...' : 'Search Songs'}</span>
-              </button>
-            </form>
-
-            {searchResults.length > 0 && (
-              <div className="manual-search-results">
-                {searchResults.map((song) => (
-                  <article key={song.songId} className="recommendation-item">
-                    <div>
-                      <p className="song-title">{song.title}</p>
-                      <p className="song-meta">{song.artist}</p>
-                      {song.album && <p className="song-reason">{song.album}</p>}
-                    </div>
-                    <button type="button" className="btn-add" onClick={() => addSongAndFocus(song)}>
-                      <Plus size={16} />
-                    </button>
-                  </article>
-                ))}
-              </div>
-            )}
-          </div>
-        </section>
-
-        <aside className="playlist-builder-panel">
-          <div className="playlist-name-row">
-            <input
-              type="text"
-              value={playlistName}
-              onChange={(e) => setPlaylistName(e.target.value)}
-              placeholder="Playlist name"
-            />
-            <button type="button" className="btn-primary" onClick={savePlaylist}>
-              <Save size={16} />
-              <span>Save</span>
-            </button>
-          </div>
-
-          <div className="playlist-hint-box">
-            <p>Saved playlists open separately in the library and include a shareable QR code.</p>
-          </div>
-
-          <h3>Selected Songs ({selectedSongs.length})</h3>
-          <div className="selected-songs-list">
-            {selectedSongs.length === 0 && <p className="empty-copy">Add songs from recommendations.</p>}
-            {selectedSongs.map((song) => (
-              <article key={`selected-${song.songId}`} className="selected-song-item">
-                <div>
-                  <p className="song-title">{song.title}</p>
-                  <p className="song-meta">{song.artist}</p>
-                </div>
-                <button type="button" onClick={() => removeSong(song.songId)}>
-                  <Trash2 size={14} />
-                </button>
-              </article>
-            ))}
-          </div>
-
-          <h3>Saved Playlists</h3>
-          <div className="saved-playlists-list">
-            {savedPlaylists.length === 0 && <p className="empty-copy">No playlists saved yet.</p>}
-            {savedPlaylists.map((playlist) => (
-              <article key={playlist.id} className="saved-playlist-item">
-                <div>
-                  <p className="song-title">{playlist.name}</p>
-                  <p className="song-meta">{playlist.songs.length} songs</p>
-                </div>
-                <button type="button" onClick={() => deletePlaylist(playlist.id)}>
-                  <Trash2 size={14} />
-                </button>
-              </article>
-            ))}
-          </div>
-
-          <div className="playlist-player-panel">
-            <div className="section-title-row">
-              <h3>Playlist Player</h3>
-              <span>{shuffleEnabled ? 'Shuffle on' : 'Shuffle off'}</span>
-            </div>
-
-            {currentPlayingSong ? (
-              <>
-                <div className="playlist-player-now">
-                  <p className="song-title">{currentPlayingSong.title}</p>
-                  <p className="song-meta">{currentPlayingSong.artist}</p>
-                </div>
-                {currentPlayingSong.previewUrl ? (
-                  <>
-                    <audio
-                      ref={audioRef}
-                      src={currentPlayingSong.previewUrl}
-                      onEnded={handleTrackEnded}
-                      onTimeUpdate={() => {
-                        if (audioRef.current) {
-                          setProgressSec(audioRef.current.currentTime || 0);
-                          setDurationSec(Number.isFinite(audioRef.current.duration) ? audioRef.current.duration : 0);
-                        }
-                      }}
-                      onLoadedMetadata={() => {
-                        if (audioRef.current) {
-                          setDurationSec(Number.isFinite(audioRef.current.duration) ? audioRef.current.duration : 0);
-                        }
-                      }}
-                    />
-
-                    <div className="player-progress-wrap">
-                      <span className="player-time">{formatTime(progressSec)}</span>
-                      <input
-                        type="range"
-                        min="0"
-                        max={Math.max(durationSec, 1)}
-                        step="0.1"
-                        value={Math.min(progressSec, durationSec || 0)}
-                        onChange={handleSeek}
-                        className="player-progress"
-                      />
-                      <span className="player-time">{formatTime(durationSec)}</span>
-                    </div>
-
-                    <div className="player-controls">
-                      <button type="button" className="player-btn" onClick={handleShuffleToggle} title="Shuffle">
-                        <Shuffle size={18} />
-                      </button>
-                      <button type="button" className="player-btn" onClick={handlePrevTrack} disabled={currentTrackIndex === 0} title="Previous">
-                        <SkipBack size={18} />
-                      </button>
-                      <button type="button" className="player-btn play-pause" onClick={togglePlayPause} title={isPlaying ? 'Pause' : 'Play'}>
-                        {isPlaying ? <Pause size={22} /> : <Play size={22} />}
-                      </button>
-                      <button type="button" className="player-btn" onClick={handleNextTrack} disabled={currentTrackIndex >= queueOrder.length - 1} title="Next">
-                        <SkipForward size={18} />
-                      </button>
-                      <button type="button" className="player-btn" onClick={handleRepeatToggle} title="Repeat current song">
-                        <Repeat size={18} />
-                      </button>
-                    </div>
-                  </>
-                ) : (
-                  <div className="preview-unavailable">
-                    <p>This track has no browser preview, but it is still part of your playlist.</p>
-                  </div>
-                )}
-
-                <p className="empty-copy">
-                  Playing {currentTrackIndex + 1} of {queueOrder.length}. Songs move one by one with optional shuffle.
-                </p>
-              </>
-            ) : (
-              <p className="empty-copy">Add songs to the playlist to enable playback.</p>
-            )}
-          </div>
-        </aside>
-      </main>
+        <PlaylistBuilder songs={playlist} onRemove={removeSong} onMove={moveSong} onSave={save} />
+      </div>
     </div>
   );
 }

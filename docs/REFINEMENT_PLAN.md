@@ -139,7 +139,7 @@ This also avoids the Spotify development-mode allowlist problem: only hosts need
 
 **PostgreSQL 16 + Prisma** (Node). Python reads the same DB via SQLAlchemy only if needed (it mostly doesn't).
 
-- **Postgres** is the source of truth for users, rooms, songs, votes, requests, playlists, and locations.
+- **Postgres** is the source of truth for users, rooms, songs, votes, requests, and playlists.
 - **Redis** handles hot, real-time, and ephemeral data: leaderboard sorted sets, sessions, OAuth state, access-token cache, Spotify search cache, recommender cache, rate limits, and the Socket.IO adapter (`@socket.io/redis-adapter`) for multi-instance scaling.
 
 ### Schema (initial)
@@ -153,9 +153,8 @@ room_members     room_id fk, user_id fk, joined_at, banned_at null, pk(room_id,u
 room_songs       room_id fk, track_id fk, added_by fk, added_at, removed_at null, pk(room_id,track_id)
 votes            room_id, track_id, user_id, created_at, pk(room_id,track_id,user_id)   ← dedupe is enforced by the DB
 song_requests    id uuid, room_id, user_id, query, status (pending|approved|rejected), resolved_track_id null, created_at, updated_at
-playlists        id uuid, owner_id fk, name, description, source (manual|ai|location), prompt, region, is_public, created_at
+playlists        id uuid, owner_id fk, name, description, source (manual|ai), prompt, is_public, created_at
 playlist_tracks  playlist_id fk, track_id fk, position, reason, pk(playlist_id,position)
-user_locations   user_id pk fk, state, city, lat, lng, accuracy, updated_at     ← replaces the global `latestLocation`
 ```
 
 ### Consistency model for votes
@@ -172,7 +171,7 @@ user_locations   user_id pk fk, state, city, lat, lng, accuracy, updated_at     
 - [ ] Repository layer (`src/repositories/*.js`). Services call repositories and Redis, not `redis` directly from controllers (`roomController.js` does this today).
 - [ ] Make `config/redis.js` resilient: retry with backoff, and don't `process.exit` on import. Add `/health` checks for Redis, Postgres, and the recommender.
 - [ ] Migrate `playlistStorage.js` (localStorage) to `/api/playlists` CRUD. Offer a one-time "import local playlists" on first login.
-- [ ] `locationController` persists per user in `user_locations`.
+- [x] ~~Per-user location~~: location-based playlists were removed in v0.4.0.
 
 ---
 
@@ -201,7 +200,7 @@ Node → upsert into `tracks`, optionally save as `playlists` row → Frontend
 - [ ] Use `httpx.AsyncClient` for Spotify. Get a client-credentials token cached in Redis, and run concurrent searches (`asyncio.gather` with a semaphore to respect rate limits and 429 `Retry-After`).
 - [ ] **Real fallbacks:** replace `"Vibe Track N"` with Spotify search on the prompt keywords, the artist, or `genre:`/region terms. Never return fake songs. Note: Spotify's `/recommendations` endpoint is not available to new apps, so the fallback must use search.
 - [ ] Use a Redis cache instead of the in-process dict so it survives restarts and works across workers.
-- [ ] One endpoint `POST /v1/recommend { mode: "ai"|"location", prompt, artist, state, count, market }`, plus `GET /health`.
+- [ ] One endpoint `POST /v1/recommend { prompt, artist, count, market }`, plus `GET /health`.
 - [ ] Internal auth: an `X-Internal-Token` header matched against the `RECOMMENDER_INTERNAL_TOKEN` env var. The service is not exposed publicly in compose.
 - [ ] Tests: `pytest` with the LLM and Spotify mocked. Include a golden test for schema parsing and a fallback test.
 - [ ] `Dockerfile` (python:3.12-slim) and a `recommender` service in compose.
@@ -231,7 +230,7 @@ Node → upsert into `tracks`, optionally save as `playlists` row → Frontend
 - [ ] **Room (guest):** sticky voting-state banner, animated leaderboard reordering (FLIP), vote button with an optimistic state that rolls back on error, "you voted" state restored after refresh, and a request-status list ("pending / approved / rejected").
 - [ ] **Admin:** separate tabs for *Queue*, *Requests* (with count badge), and *Search*. The voting toggle shows a confirm on close, a "Play winner" action, and an end-party summary.
 - [ ] **Create playlist:** chat-style prompt with suggestion chips, real album art (tracks are now real Spotify tracks), per-track remove or regenerate, "Save" to DB, and "Export to my Spotify" (`POST /v1/me/playlists`, which needs the `playlist-modify-private` scope).
-- [ ] **Location:** opt-in prompt instead of automatic tracking on every page (`LocationTracker` currently runs globally in `App.jsx`).
+- [x] **Location:** removed entirely in v0.4.0 (UI, API, recommender and `user_locations` table).
 - [ ] Accessibility: focus states, `aria-live` region for leaderboard changes, 44px touch targets, `prefers-reduced-motion`.
 - [ ] Mobile-first layouts for the room and player (guests will mostly be on phones).
 
@@ -289,18 +288,17 @@ Also: `song_request_processed` is currently broadcast to the **whole room**, so 
 
 ## 8. Implementation order (PR-sized milestones)
 
-| # | Milestone | Depends on | Size |
+| # | Version | Milestone | Status |
 |---|---|---|---|
-| 1 | **Voting hotfix** (section 1, steps 1–5): ship immediately; independent of everything else | – | S |
-| 2 | Infra: Postgres in compose, Prisma schema and migrations, resilient Redis, health checks | – | M |
-| 3 | Backend-owned Spotify OAuth, guest sessions, `requireSession` / `requireSpotifyUser`, socket auth, fixed redirect URI (sections 2 and 3) | 2 | L |
-| 4 | Frontend auth: `AuthProvider`, `/login`, guest join form, route guards, player token from backend, remove localStorage tokens | 3 | M |
-| 5 | Rooms, votes, and requests on Postgres + Redis, host-only admin events, socket contract v2 | 3 | L |
-| 6 | Python recommender rewrite (FastAPI, structured output, Spotify matching, Redis cache) + Node thin proxy | 2 | L |
-| 7 | Playlists in DB, export to Spotify, per-user location | 5, 6 | M |
-| 8 | Frontend overhaul (tokens/CSS modules, TanStack Query, toasts, new room/admin/playlist UX) | 4, 5 | L |
-| 9 | Tests, CI, localhost dev tooling (`dev` script, doctor), docs refresh (README, QUICKSTART, TROUBLESHOOTING) | all | M |
-| 10 | *Deferred:* Terraform provisioning and hosted deployment | all | L |
+| 1 | v0.1.0 | Voting hotfix (section 1) | Done |
+| 2 | v0.2.0 | Infra: Postgres + Prisma, resilient Redis, health checks, dev tooling | Done |
+| 3 | v0.3.0 | Spotify OAuth on the backend, guest sessions, socket auth, redirect URI fix, frontend auth (sections 2 and 3) | Done |
+| 4 | v0.4.0 | Frontend redesign (design system, CSS modules, shared playback, new pages) and removal of location-based playlists | Done |
+| 5 | v0.5.0 | Rooms, votes and requests on Postgres + Redis, guest-to-Spotify vote merge, socket contract v2 | Next |
+| 6 | v0.6.0 | Python recommender rewrite (FastAPI, structured output, Spotify matching, Redis cache) + Node thin proxy | |
+| 7 | v0.7.0 | Playlists in the database, export to Spotify | |
+| 8 | v0.8.0 | Tests, CI, docs refresh | |
+| 9 | later | Terraform provisioning and hosted deployment | Deferred |
 
 ## 9. Decisions
 
@@ -310,4 +308,5 @@ Also: `song_request_processed` is currently broadcast to the **whole room**, so 
 | ORM | **Prisma.** |
 | LLM provider | **Gemini** (`GOOGLE_API_KEY`), via LangChain in the Python service. Kept behind `app/llm.py`. |
 | Target environment | **Localhost first** (section 7). |
-| Hosting | **Deferred.** Will be provisioned with **Terraform** (milestone 10). |
+| Hosting | **Deferred.** Will be provisioned with **Terraform** (milestone 9). |
+| Location playlists | **Removed** (v0.4.0). |

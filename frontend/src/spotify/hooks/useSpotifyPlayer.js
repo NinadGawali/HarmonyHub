@@ -19,7 +19,9 @@ function normalizePlayerState(state) {
     durationMs: state.duration,
     trackUri: currentTrack?.uri || null,
     trackName: currentTrack?.name || '',
-    artistName: currentTrack?.artists?.map((artist) => artist.name).join(', ') || ''
+    artistName: currentTrack?.artists?.map((artist) => artist.name).join(', ') || '',
+    // Lets the UI extrapolate progress between SDK updates.
+    updatedAt: Date.now()
   };
 }
 
