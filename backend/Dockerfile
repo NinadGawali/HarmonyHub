@@ -1,13 +1,17 @@
-FROM node:18-alpine
+FROM node:22-alpine
 
 WORKDIR /app
 
-COPY package*.json ./
+# Prisma's query engine needs OpenSSL on Alpine.
+RUN apk add --no-cache openssl
 
-RUN npm ci --only=production
+COPY package.json package-lock.json ./
+COPY prisma ./prisma
+RUN npm ci --omit=dev
 
-COPY . .
+COPY src ./src
 
+ENV NODE_ENV=production
 EXPOSE 3000
 
-CMD ["npm", "start"]
+CMD ["npm", "run", "start:prod"]

@@ -1,5 +1,27 @@
-const redis = require('../config/redis');
+const { redis } = require('../config/redis');
+const { config } = require('../config/env');
 const { searchSongs, getTrackDetails } = require('./spotifyService');
+
+class RoomNotFoundError extends Error {
+  constructor(roomId) {
+    super(`Room ${roomId} not found or expired`);
+    this.name = 'RoomNotFoundError';
+  }
+}
+
+const assertRoomExists = async (roomId) => {
+  if (!(await redis.exists(`room:${roomId}`))) {
+    throw new RoomNotFoundError(roomId);
+  }
+};
+
+// Give room-scoped keys the same remaining lifetime as the room itself, so nothing
+// outlives the room. Falls back to the default TTL if the room key has none.
+const expireWithRoom = async (roomId, ...keys) => {
+  const roomTtlMs = await redis.pTTL(`room:${roomId}`);
+  const ttlMs = roomTtlMs > 0 ? roomTtlMs : config.roomTtlSeconds * 1000;
+  await Promise.all(keys.map((key) => redis.pExpire(key, ttlMs)));
+};
 
 class VoteError extends Error {
   constructor(code, message) {
@@ -25,6 +47,7 @@ const voteSong = async (roomId, songId, userId) => {
     }
 
     await redis.zIncrBy(`leaderboard:${roomId}`, 1, songId);
+    await expireWithRoom(roomId, `votes:${roomId}:${songId}`);
 
     // Get updated leaderboard
     const leaderboard = await getLeaderboard(roomId);
@@ -39,6 +62,23 @@ const voteSong = async (roomId, songId, userId) => {
 };
 
 // Song ids in the room that the user has already voted for
+// Delete every key that belongs to a room
+const deleteRoomData = async (roomId) => {
+  const [songIds, requestIds] = await Promise.all([
+    redis.zRange(`leaderboard:${roomId}`, 0, -1),
+    redis.lRange(`songrequests:pending:${roomId}`, 0, -1)
+  ]);
+
+  await redis.del([
+    `room:${roomId}`,
+    `leaderboard:${roomId}`,
+    `roomUsers:${roomId}`,
+    `songrequests:pending:${roomId}`,
+    ...songIds.map((songId) => `votes:${roomId}:${songId}`),
+    ...requestIds.map((requestId) => `songrequest:${requestId}`)
+  ]);
+};
+
 const getUserVotes = async (roomId, userId) => {
   const songIds = await redis.zRange(`leaderboard:${roomId}`, 0, -1);
   if (!songIds.length) {
@@ -97,6 +137,8 @@ const addSongToRoom = async (roomId, songData) => {
   try {
     const { songId, title, artist, image, spotifyUrl, previewUrl } = songData;
 
+    await assertRoomExists(roomId);
+
     // Store song metadata
     await redis.hSet(`song:${songId}`, {
       title,
@@ -107,10 +149,9 @@ const addSongToRoom = async (roomId, songData) => {
     });
 
     // Add to leaderboard with 0 votes
-    await redis.zAdd(`leaderboard:${roomId}`, {
-      score: 0,
-      value: songId
-    });
+    // NX keeps existing votes if the song is added again.
+    await redis.zAdd(`leaderboard:${roomId}`, { score: 0, value: songId }, { NX: true });
+    await expireWithRoom(roomId, `leaderboard:${roomId}`, `song:${songId}`);
 
     return true;
   } catch (error) {
@@ -148,6 +189,8 @@ const hasUserVoted = async (roomId, songId, userId) => {
 // Set voting status for a room
 const setVotingStatus = async (roomId, isOpen) => {
   try {
+    // HSET on an expired room would recreate it without a TTL.
+    await assertRoomExists(roomId);
     await redis.hSet(`room:${roomId}`, 'votingOpen', isOpen ? 'true' : 'false');
     return true;
   } catch (error) {
@@ -220,8 +263,10 @@ const submitSongRequest = async (roomId, requestData) => {
       updatedAt: now
     };
 
+    await assertRoomExists(roomId);
     await redis.hSet(`songrequest:${requestId}`, request);
     await redis.rPush(`songrequests:pending:${roomId}`, requestId);
+    await expireWithRoom(roomId, `songrequest:${requestId}`, `songrequests:pending:${roomId}`);
 
     return request;
   } catch (error) {
@@ -312,6 +357,9 @@ const rejectSongRequest = async (roomId, requestId) => {
 
 module.exports = {
   VoteError,
+  RoomNotFoundError,
+  expireWithRoom,
+  deleteRoomData,
   voteSong,
   getUserVotes,
   getLeaderboard,

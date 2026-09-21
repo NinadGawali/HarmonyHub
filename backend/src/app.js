@@ -1,5 +1,7 @@
 const express = require('express');
 const cors = require('cors');
+const { config } = require('./config/env');
+const { getHealth } = require('./services/healthService');
 const roomRoutes = require('./routes/roomRoutes');
 const songRoutes = require('./routes/songRoutes');
 const spotifyRoutes = require('./routes/spotifyRoutes');
@@ -11,16 +13,17 @@ const app = express();
 
 // Middleware
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  origin: config.corsOrigin,
   credentials: true
 }));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+// Health check: 200 when required dependencies are up, 503 otherwise
+app.get('/health', async (req, res) => {
+  const health = await getHealth();
+  res.status(health.status === 'ok' ? 200 : 503).json(health);
 });
 
 // API Routes

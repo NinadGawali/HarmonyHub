@@ -1,6 +1,8 @@
 const axios = require('axios');
 
-const PYTHON_RECOMMENDER_URL = process.env.PYTHON_RECOMMENDER_URL || 'http://127.0.0.1:5001';
+const { config } = require('../config/env');
+
+const PYTHON_RECOMMENDER_URL = config.recommenderUrl;
 
 const fallbackSongs = (artist, mood, count = 8, source = 'ai') => {
   const baseArtists = artist

@@ -1,53 +1,71 @@
-version: '3.8'
+# Local development:
+#   docker compose up -d                 -> Postgres + Redis (run backend/frontend on the host)
+#   docker compose --profile full up -d  -> everything in containers
+name: harmonyhub
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: harmonyhub-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-harmonyhub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-harmonyhub}
+      POSTGRES_DB: ${POSTGRES_DB:-harmonyhub}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-harmonyhub} -d ${POSTGRES_DB:-harmonyhub}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
   redis:
     image: redis:7-alpine
     container_name: harmonyhub-redis
+    command: redis-server --appendonly yes
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
-    command: redis-server --appendonly yes
-    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
+      interval: 5s
       timeout: 3s
-      retries: 3
+      retries: 10
+    restart: unless-stopped
 
   backend:
+    profiles: ["full"]
     build: ./backend
     container_name: harmonyhub-backend
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-harmonyhub}:${POSTGRES_PASSWORD:-harmonyhub}@postgres:5432/${POSTGRES_DB:-harmonyhub}?schema=public
+      REDIS_URL: redis://redis:6379
     ports:
       - "3000:3000"
-    environment:
-      - PORT=3000
-      - REDIS_URL=redis://redis:6379
-      - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID}
-      - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET}
-      - CORS_ORIGIN=http://localhost:5173
-      - NODE_ENV=production
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     restart: unless-stopped
-    volumes:
-      - ./backend:/app
-      - /app/node_modules
 
   frontend:
+    profiles: ["full"]
     build: ./frontend
     container_name: harmonyhub-frontend
     ports:
       - "5173:80"
-    environment:
-      - VITE_API_URL=http://localhost:3000/api
-      - VITE_SOCKET_URL=http://localhost:3000
     depends_on:
       - backend
     restart: unless-stopped
 
 volumes:
+  postgres-data:
   redis-data:
-    driver: local

@@ -1,5 +1,7 @@
-const redis = require('../config/redis');
+const { redis } = require('../config/redis');
+const { config } = require('../config/env');
 const { generateRoomCode } = require('../utils/generateRoomCode');
+const votingService = require('../services/votingService');
 
 // Create a new room
 const createRoom = async (req, res) => {
@@ -20,8 +22,7 @@ const createRoom = async (req, res) => {
       votingOpen: 'true'
     });
 
-    // Set room expiry to 24 hours
-    await redis.expire(`room:${roomId}`, 86400);
+    await redis.expire(`room:${roomId}`, config.roomTtlSeconds);
 
     res.status(201).json({
       roomId,
@@ -83,6 +84,7 @@ const joinRoom = async (req, res) => {
     // Add user to room
     const userId = `${userName.trim()}_${Date.now()}`;
     await redis.sAdd(`roomUsers:${roomId}`, userId);
+    await votingService.expireWithRoom(roomId, `roomUsers:${roomId}`);
 
     res.json({
       message: 'Joined room successfully',
@@ -101,10 +103,7 @@ const deleteRoom = async (req, res) => {
   try {
     const { roomId } = req.params;
 
-    // Delete all room-related keys
-    await redis.del(`room:${roomId}`);
-    await redis.del(`leaderboard:${roomId}`);
-    await redis.del(`roomUsers:${roomId}`);
+    await votingService.deleteRoomData(roomId);
 
     res.json({ message: 'Room deleted successfully' });
   } catch (error) {

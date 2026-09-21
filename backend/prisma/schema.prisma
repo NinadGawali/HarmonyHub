@@ -1,0 +1,211 @@
+// HarmonyHub persistent data model.
+// Postgres is the source of truth; Redis holds hot/ephemeral state (live leaderboards,
+// sessions, caches). See docs/REFINEMENT_PLAN.md, section 4.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RoomStatus {
+  ACTIVE
+  ENDED
+}
+
+enum SongRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum PlaylistSource {
+  MANUAL
+  AI
+  LOCATION
+}
+
+model User {
+  id          String    @id @default(uuid()) @db.Uuid
+  isGuest     Boolean   @default(false) @map("is_guest")
+  spotifyId   String?   @unique @map("spotify_id")
+  displayName String    @map("display_name")
+  email       String?
+  avatarUrl   String?   @map("avatar_url")
+  country     String?
+  product     String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  lastLoginAt DateTime? @map("last_login_at")
+
+  spotifyToken SpotifyToken?
+  hostedRooms  Room[]
+  memberships  RoomMember[]
+  addedSongs   RoomSong[]
+  votes        Vote[]
+  songRequests SongRequest[]
+  playlists    Playlist[]
+  location     UserLocation?
+
+  @@map("users")
+}
+
+model SpotifyToken {
+  userId          String   @id @map("user_id") @db.Uuid
+  refreshTokenEnc String   @map("refresh_token_enc")
+  scope           String
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("spotify_tokens")
+}
+
+model Track {
+  spotifyId  String   @id @map("spotify_id")
+  title      String
+  artist     String
+  album      String?
+  imageUrl   String?  @map("image_url")
+  durationMs Int?     @map("duration_ms")
+  previewUrl String?  @map("preview_url")
+  spotifyUrl String?  @map("spotify_url")
+  cachedAt   DateTime @default(now()) @updatedAt @map("cached_at")
+
+  roomSongs      RoomSong[]
+  votes          Vote[]
+  playlistTracks PlaylistTrack[]
+  songRequests   SongRequest[]
+
+  @@map("tracks")
+}
+
+model Room {
+  // The human-friendly room code doubles as the primary key.
+  id         String     @id
+  hostUserId String?    @map("host_user_id") @db.Uuid
+  name       String?
+  votingOpen Boolean    @default(true) @map("voting_open")
+  status     RoomStatus @default(ACTIVE)
+  createdAt  DateTime   @default(now()) @map("created_at")
+  expiresAt  DateTime   @map("expires_at")
+
+  host         User?         @relation(fields: [hostUserId], references: [id], onDelete: SetNull)
+  members      RoomMember[]
+  songs        RoomSong[]
+  votes        Vote[]
+  songRequests SongRequest[]
+
+  @@index([status, expiresAt])
+  @@map("rooms")
+}
+
+model RoomMember {
+  roomId   String    @map("room_id")
+  userId   String    @map("user_id") @db.Uuid
+  joinedAt DateTime  @default(now()) @map("joined_at")
+  bannedAt DateTime? @map("banned_at")
+
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([roomId, userId])
+  @@map("room_members")
+}
+
+model RoomSong {
+  roomId    String    @map("room_id")
+  trackId   String    @map("track_id")
+  addedById String?   @map("added_by") @db.Uuid
+  addedAt   DateTime  @default(now()) @map("added_at")
+  removedAt DateTime? @map("removed_at")
+
+  room    Room  @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  track   Track @relation(fields: [trackId], references: [spotifyId])
+  addedBy User? @relation(fields: [addedById], references: [id], onDelete: SetNull)
+
+  @@id([roomId, trackId])
+  @@map("room_songs")
+}
+
+model Vote {
+  roomId    String   @map("room_id")
+  trackId   String   @map("track_id")
+  userId    String   @map("user_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  room  Room  @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  track Track @relation(fields: [trackId], references: [spotifyId])
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // One vote per user per song per room, enforced by the database.
+  @@id([roomId, trackId, userId])
+  @@index([roomId, trackId])
+  @@map("votes")
+}
+
+model SongRequest {
+  id              String            @id @default(uuid()) @db.Uuid
+  roomId          String            @map("room_id")
+  userId          String            @map("user_id") @db.Uuid
+  query           String
+  status          SongRequestStatus @default(PENDING)
+  resolvedTrackId String?           @map("resolved_track_id")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+
+  room          Room   @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user          User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  resolvedTrack Track? @relation(fields: [resolvedTrackId], references: [spotifyId])
+
+  @@index([roomId, status])
+  @@map("song_requests")
+}
+
+model Playlist {
+  id          String         @id @default(uuid()) @db.Uuid
+  ownerId     String         @map("owner_id") @db.Uuid
+  name        String
+  description String?
+  source      PlaylistSource @default(MANUAL)
+  prompt      String?
+  region      String?
+  isPublic    Boolean        @default(false) @map("is_public")
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  owner  User            @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  tracks PlaylistTrack[]
+
+  @@index([ownerId])
+  @@map("playlists")
+}
+
+model PlaylistTrack {
+  playlistId String  @map("playlist_id") @db.Uuid
+  position   Int
+  trackId    String  @map("track_id")
+  reason     String?
+
+  playlist Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  track    Track    @relation(fields: [trackId], references: [spotifyId])
+
+  @@id([playlistId, position])
+  @@map("playlist_tracks")
+}
+
+model UserLocation {
+  userId    String   @id @map("user_id") @db.Uuid
+  state     String?
+  city      String?
+  latitude  Float
+  longitude Float
+  accuracy  Float?
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_locations")
+}

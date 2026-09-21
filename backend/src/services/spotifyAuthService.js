@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { config } = require('../config/env');
 
 const SPOTIFY_ACCOUNTS_BASE_URL = 'https://accounts.spotify.com';
 const DEFAULT_SPOTIFY_SCOPE = [
@@ -11,8 +12,7 @@ const DEFAULT_SPOTIFY_SCOPE = [
 ].join(' ');
 
 function getSpotifyCredentials() {
-  const clientId = process.env.SPOTIFY_CLIENT_ID;
-  const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
+  const { clientId, clientSecret } = config.spotify;
 
   if (!clientId || !clientSecret) {
     throw new Error('Spotify OAuth credentials are not configured');

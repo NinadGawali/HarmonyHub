@@ -172,157 +172,24 @@ Admin searches → REST API → Spotify API → Format & Return → Display Resu
 
 ## 📦 Prerequisites
 
-Before running HarmonyHub, ensure you have:
-
-- **Node.js** >= 18.x ([Download](https://nodejs.org/))
-- **npm** >= 9.x (comes with Node.js)
-- **Redis** >= 7.x ([Installation Guide](#redis-installation))
-- **Spotify Developer Account** ([Setup Guide](#spotify-api-setup))
-
-### Redis Installation
-
-#### Windows
-```powershell
-# Using Chocolatey
-choco install redis-64
-
-# Or download from:
-# https://github.com/tporadowski/redis/releases
-```
-
-#### macOS
-```bash
-brew install redis
-brew services start redis
-```
-
-#### Linux (Ubuntu/Debian)
-```bash
-sudo apt update
-sudo apt install redis-server
-sudo systemctl start redis
-sudo systemctl enable redis
-```
-
-### Spotify API Setup
-
-1. Go to [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
-2. Click **Create App**
-3. Fill in details:
-   - App Name: `HarmonyHub`
-   - App Description: `Music voting system`
-  - Redirect URI: `http://localhost:5173/spotify/callback` (for frontend login callback)
-4. Accept terms and click **Create**
-5. Copy your **Client ID** and **Client Secret**
+- Node.js 20+
+- Docker Desktop (runs Postgres and Redis)
+- Python 3.11+ (optional, AI playlists)
+- Spotify app credentials and a Google Gemini API key
 
 ---
 
 ## 🚀 Quick Start
 
-### 1. Clone the Repository
-
 ```bash
-git clone <your-repo-url>
-cd HarmonyHub
+npm run setup            # install dependencies
+cp .env.example .env     # then add Spotify + Gemini keys
+npm run dev:deps         # Postgres + Redis in Docker
+npm run db:migrate       # create the database schema
+npm run dev              # backend :3000, frontend :5173, recommender :5001
 ```
 
-### 2. Backend Setup
-
-```bash
-cd backend
-
-# Install dependencies
-npm install
-
-# Create .env file
-cp .env.example .env
-
-# Edit .env with your credentials
-# Required:
-#   - SPOTIFY_CLIENT_ID=your_client_id
-#   - SPOTIFY_CLIENT_SECRET=your_client_secret
-```
-
-**backend/.env:**
-```env
-PORT=3000
-REDIS_URL=redis://localhost:6379
-SPOTIFY_CLIENT_ID=your_actual_client_id_here
-SPOTIFY_CLIENT_SECRET=your_actual_client_secret_here
-GOOGLE_API_KEY=your_google_gemini_api_key_here
-CORS_ORIGIN=http://localhost:5173
-```
-
-Create `backend/.env` by copying `backend/.env.example`, then fill in the values above. The AI playlist generator uses `GOOGLE_API_KEY` for Gemini; if it is missing, the app falls back to non-AI recommendations.
-
-### 3. Frontend Setup
-
-```bash
-cd ../frontend
-
-# Install dependencies
-npm install
-
-# Create .env file (optional, uses defaults)
-cp .env.example .env
-```
-
-**frontend/.env:**
-```env
-VITE_API_URL=http://localhost:3000/api
-VITE_SOCKET_URL=http://localhost:3000
-VITE_SPOTIFY_REDIRECT_URI=http://localhost:5173/spotify/callback
-```
-
-### 4. Start Redis
-
-```bash
-# Windows
-redis-server
-
-# macOS/Linux
-redis-server
-```
-http://54.92.200.109:5173/
-
-Verify Redis is running:
-```bash
-redis-cli ping
-# Should return: PONG
-```
-
-### 5. Run the Application
-
-**Terminal 1 - Backend:**
-```bash
-cd backend
-npm run dev
-```
-
-You should see:
-```
-✅ Redis connected successfully
-✅ Server running on port 3000
-🔌 WebSocket ready for connections
-```
-
-**Terminal 2 - Frontend:**
-```bash
-cd frontend
-npm run dev
-```
-
-You should see:
-```
-VITE v4.x.x  ready in xxx ms
-
-➜  Local:   http://localhost:5173/
-➜  Network: use --host to expose
-```
-
-### 6. Open the App
-
-Visit **http://localhost:5173** in your browser 🎉
+Full guide: [docs/QUICKSTART.md](docs/QUICKSTART.md). Released versions are tagged. Run `git checkout v0.2.0` for a specific one, and see [CHANGELOG.md](CHANGELOG.md) for what each contains.
 
 ---
 
@@ -330,15 +197,19 @@ Visit **http://localhost:5173** in your browser 🎉
 
 ### Environment Variables
 
-#### Backend (.env)
+#### Root `.env` (backend, Prisma, docker compose, recommender)
+
+All variables are documented in [`.env.example`](.env.example). The main ones:
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
-| `PORT` | Server port | `3000` | No |
+| `DATABASE_URL` | Postgres connection string | `postgresql://harmonyhub:harmonyhub@localhost:5432/harmonyhub` | Yes |
 | `REDIS_URL` | Redis connection string | `redis://localhost:6379` | Yes |
-| `SPOTIFY_CLIENT_ID` | Spotify app client ID | - | Yes |
-| `SPOTIFY_CLIENT_SECRET` | Spotify app secret | - | Yes |
-| `CORS_ORIGIN` | Allowed origin for CORS | `http://localhost:5173` | No |
+| `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` | Spotify app credentials | - | Yes |
+| `GOOGLE_API_KEY` | Gemini key for AI playlists | - | For AI features |
+| `PORT` | Backend port | `3000` | No |
+| `CORS_ORIGIN` | Allowed frontend origin | `http://localhost:5173` | No |
+| `ROOM_TTL_SECONDS` | Lifetime of a party room and its data | `86400` | No |
 
 #### Frontend (.env)
 
