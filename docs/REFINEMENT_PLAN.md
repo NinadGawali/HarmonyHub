@@ -1,10 +1,12 @@
 # HarmonyHub Refinement Plan
 
-Status: **Proposed** · Branch: `docs` · Date: 2026-09-21
+Status: **Accepted** · Branch: `docs` · Date: 2026-09-21
+
+**Current target: run everything on localhost.** Hosting and provisioning (Terraform) come later; see section 9.
 
 This plan covers six workstreams:
 
-1. Spotify-only authentication with real server-side validation
+1. Spotify authentication for hosts, lightweight guest sessions for party guests
 2. Fix the Spotify "redirect URI not valid" error
 3. Fix the party room voting bug
 4. Persistent database (PostgreSQL) alongside Redis
@@ -73,10 +75,10 @@ Spotify ──302──▶ Backend GET /api/auth/spotify/callback?code&state
 ```
 
 - A single redirect URI comes from env (`SPOTIFY_REDIRECT_URI`) and is **never** taken from the client.
-- Dev value: `http://127.0.0.1:3000/api/auth/spotify/callback`. Register exactly this in the Spotify Dashboard.
-- Dev frontend is served at `http://127.0.0.1:5173`. Set Vite `server.host: '127.0.0.1'` and `CORS_ORIGIN=http://127.0.0.1:5173`, so cookies and origins line up. If someone opens `localhost:5173`, a small guard in `main.jsx` redirects to `127.0.0.1`.
-- **Phones and guests on LAN:** Spotify will not accept `http://192.168.x.x`. Use an HTTPS tunnel (`cloudflared tunnel` or `ngrok`) and register that HTTPS callback as a second redirect URI. The backend picks the URI via env per environment.
-- Production: `https://<domain>/api/auth/spotify/callback`.
+- Dev value: `http://127.0.0.1:5173/api/auth/spotify/callback` (the Vite proxy forwards it to the backend; see section 7). Register exactly this in the Spotify Dashboard.
+- Dev frontend is served at `http://127.0.0.1:5173`. Set Vite `server.host: '127.0.0.1'` and proxy `/api` to the backend, so the browser only ever sees one origin. If someone opens `localhost:5173`, a small guard in `main.jsx` redirects to `127.0.0.1`.
+- **Phones on LAN (deferred):** Spotify will not accept `http://192.168.x.x`. This only matters for hosts logging in from another device. Guests don't need Spotify login (section 3), so they can join over plain LAN HTTP. If a host ever needs it before hosting is set up, use an HTTPS tunnel (`cloudflared` / `ngrok`) and register it as a second redirect URI.
+- Production (deferred to the Terraform phase): `https://<domain>/api/auth/spotify/callback`. The backend already reads the URI from env, so no code change is needed.
 - Remove `VITE_SPOTIFY_REDIRECT_URI`, `SpotifyCallback.jsx` token exchange, and `authStorage.js` OAuth state helpers.
 
 ### Tasks
@@ -88,34 +90,46 @@ Spotify ──302──▶ Backend GET /api/auth/spotify/callback?code&state
 
 ---
 
-## 3. Spotify-only authentication
+## 3. Authentication: Spotify for hosts, guest sessions for guests
 
-"Strictly Spotify" means: **Spotify OAuth is the only way to get an identity.** There are no passwords and no guest names. Your app credentials (`SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET`) stay on the server only.
+**Decision:** guest login is **not** strict.
 
-### Sessions
+- **Spotify login is required** to host a party (create or admin a room), and to create, save or export playlists.
+- **Guests** join a room with just a room code and a display name. They get a real server-side guest identity, so vote dedupe still works across page refreshes. Guests can optionally upgrade to Spotify login, for example to use in-browser playback.
+- App credentials (`SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET`) stay on the server only.
 
-- On callback, upsert `users(spotify_id, display_name, email, avatar_url, country, product)`.
-- Store the **refresh token encrypted** (AES-256-GCM, key in `TOKEN_ENCRYPTION_KEY`) in Postgres `spotify_tokens`. Cache the current access token in Redis with a TTL.
-- Session: a random 32-byte id in an `httpOnly; SameSite=Lax; Secure (prod)` cookie `hh_sid`, mapped in Redis `session:{sid}` → `{ userId }`, with a 7-day sliding TTL. Use a Redis store with `express-session` (`connect-redis`) or a small custom middleware.
-- `requireAuth` middleware on all `/api/*` routes except `/health` and `/api/auth/*`.
-- **Socket.IO auth:** `io.use()` reads the cookie from `socket.handshake.headers.cookie` and resolves the session. Unauthenticated connections are rejected. `socket.data.user` then becomes the only source of `userId`, and all client-sent `userId` fields are removed from events.
-- **Room ownership:** `rooms.host_user_id`. Admin events (`add_song`, `remove_song`, `toggle_voting`, `approve/reject_song_request`, `spotify_control`) check `socket.data.user.id === room.host_user_id`. Clients should also only receive events for rooms they joined.
-- Input validation: `zod` schemas for REST bodies and socket payloads. Add `express-rate-limit`, and a per-socket vote rate limit in Redis.
+This also avoids the Spotify development-mode allowlist problem: only hosts need to be added in the Spotify dashboard, not every guest.
 
-### Constraints you need to decide on
+### Identities and sessions
 
-- **Spotify development mode** only allows users you add by hand in the dashboard (a small allowlist). Extended quota requires applying to Spotify. Strict Spotify login for *every party guest* means each guest must be allowlisted until the app is approved.
-- **Web Playback SDK requires Spotify Premium.** Voting does not.
-- Recommendation: require Spotify login for everyone, as requested. Show a clear "Premium required for in-browser playback" note in the player only, not a login block. If the allowlist becomes a blocker, a later option is signed room-invite links for guests. That option is **not** in this plan.
+- One `users` table for both kinds: `is_guest bool`. `spotify_id` is nullable (unique when set).
+- **Spotify login:** on callback, upsert `users(spotify_id, display_name, email, avatar_url, country, product)`. Store the **refresh token encrypted** (AES-256-GCM, key in `TOKEN_ENCRYPTION_KEY`) in Postgres `spotify_tokens`. Cache the current access token in Redis with a TTL.
+- **Guest join:** `POST /api/rooms/:roomId/join { displayName }`. If there is no session yet, create a guest user (`is_guest = true`) and a session. If a session already exists (guest or Spotify), reuse it. Guest display names are validated (length, trimmed, unique-ish within the room by suffixing `#2`).
+- **Upgrade:** if a guest logs in with Spotify, the callback merges the guest's room memberships and votes into the Spotify user (skipping any duplicate votes), then deletes the guest row.
+- **Session:** a random 32-byte id in an `httpOnly; SameSite=Lax` cookie `hh_sid` (`Secure` added once HTTPS hosting exists), mapped in Redis `session:{sid}` → `{ userId, isGuest }`. TTL: 7 days sliding for Spotify users, 24 hours for guests.
+- **Middleware:**
+  - `requireSession`: any user (guest or Spotify). Used for joining rooms, voting, requesting songs.
+  - `requireSpotifyUser`: Spotify users only. Used for creating rooms, admin actions, playlists, AI generation, `/api/auth/spotify-token`.
+- **Socket.IO auth:** `io.use()` reads the cookie from `socket.handshake.headers.cookie` and resolves the session. Connections with no session are rejected. `socket.data.user` becomes the only source of `userId`, and all client-sent `userId` fields are removed from events.
+- **Room ownership:** `rooms.host_user_id` (always a Spotify user). Admin events (`add_song`, `remove_song`, `toggle_voting`, `approve/reject_song_request`, `spotify_control`) check `socket.data.user.id === room.host_user_id`. Clients only receive events for rooms they joined.
+- **Abuse limits for guests:** since guest accounts are cheap to create, add a per-IP limit on guest creation (Redis counter, e.g. 10/hour) and a per-user vote/request rate limit. Hosts can kick a guest (marks `room_members.banned_at`).
+- Input validation: `zod` schemas for REST bodies and socket payloads, plus `express-rate-limit`.
+
+### Constraints
+
+- **Spotify development mode:** only allowlisted accounts can log in. With this design that means only hosts, which is fine for localhost development.
+- **Web Playback SDK requires Spotify Premium.** Voting does not. Show a clear "Premium required for in-browser playback" note in the player, not a login block.
 
 ### Frontend
 
-- `AuthProvider` context: calls `GET /api/auth/me` on load and exposes `user`, `login(returnPath)`, `logout()`.
-- `<RequireAuth>` route wrapper for `/party-room`, `/room/:id`, `/admin/:id`, `/create-playlist`, `/playlists*`.
-- New `/login` page with a single "Continue with Spotify" button.
-- `useSpotifyPlayer` gets tokens from `GET /api/auth/spotify-token`. It no longer touches `localStorage` or refresh tokens.
-- axios: `withCredentials: true`. socket.io-client: `withCredentials: true`. A 401 anywhere triggers `login()`.
-- Party room: drop the "Your name" inputs and use the Spotify display name.
+- `AuthProvider` context: calls `GET /api/auth/me` on load and exposes `user` (with `isGuest`), `loginWithSpotify(returnPath)`, `joinAsGuest(roomId, displayName)`, `logout()`.
+- Route guards:
+  - `<RequireSpotify>` for `/admin/:id`, `/create-playlist`, `/playlists*`, and the "Host a party" action.
+  - `<RequireSession>` for `/room/:id`. If there is no session, show an inline "Join as guest (name)" form or "Continue with Spotify".
+- New `/login` page with "Continue with Spotify".
+- Party room lobby: "Host a party" (Spotify) and "Join with code" (name field only if not logged in; Spotify users skip it and use their display name).
+- `useSpotifyPlayer` gets tokens from `GET /api/auth/spotify-token`. It no longer touches `localStorage` or refresh tokens. For guests, the player shows "Log in with Spotify to play here".
+- axios: `withCredentials: true`. socket.io-client: `withCredentials: true`. A 401 sends the user to the right entry point (guest join form in a room, `/login` elsewhere).
 
 ---
 
@@ -131,11 +145,11 @@ Spotify ──302──▶ Backend GET /api/auth/spotify/callback?code&state
 ### Schema (initial)
 
 ```text
-users            id uuid pk, spotify_id unique, display_name, email, avatar_url, country, product, created_at, last_login_at
+users            id uuid pk, is_guest bool, spotify_id unique null, display_name, email, avatar_url, country, product, created_at, last_login_at
 spotify_tokens   user_id pk fk, refresh_token_enc, scope, updated_at
 tracks           spotify_id pk, title, artist, album, image_url, duration_ms, preview_url, spotify_url, cached_at
 rooms            id pk (room code), host_user_id fk, name, voting_open bool default true, status (active|ended), created_at, expires_at
-room_members     room_id fk, user_id fk, joined_at, pk(room_id,user_id)
+room_members     room_id fk, user_id fk, joined_at, banned_at null, pk(room_id,user_id)
 room_songs       room_id fk, track_id fk, added_by fk, added_at, removed_at null, pk(room_id,track_id)
 votes            room_id, track_id, user_id, created_at, pk(room_id,track_id,user_id)   ← dedupe is enforced by the DB
 song_requests    id uuid, room_id, user_id, query, status (pending|approved|rejected), resolved_track_id null, created_at, updated_at
@@ -225,21 +239,29 @@ Node → upsert into `tracks`, optionally save as `playlists` row → Frontend
 
 ## 7. Wiring it together
 
-### Target topology (docker-compose)
+### Localhost setup (current target)
 
 ```
-frontend (nginx, :5173 dev via vite / :80 prod)
-   │  /api, /socket.io  (nginx reverse proxy → same origin, so cookies just work)
-backend (Node/Express + Socket.IO, :3000)
-   ├── postgres  (:5432, volume)
-   ├── redis     (:6379, AOF volume)
-   └── recommender (FastAPI, :5001, internal only) ── redis
+Browser  http://127.0.0.1:5173   (Vite dev server; proxies /api and /socket.io → :3000, so it's one origin and cookies just work)
+   │
+backend  Node/Express + Socket.IO  :3000   (runs on host with nodemon)
+   ├── postgres     :5432   ┐
+   ├── redis        :6379   ├─ docker compose (dev profile)
+   └── recommender  :5001   ┘  FastAPI, also usable directly with uvicorn --reload
 ```
 
-- Serve the frontend and API from **one origin** in prod (nginx proxies `/api` and `/socket.io`). Use the Vite `server.proxy` in dev. This removes most CORS and cookie problems.
+- `docker-compose.yml` runs the dependencies (Postgres, Redis, recommender). Backend and frontend run on the host for fast hot reload. A `full` compose profile runs everything in containers for a one-command demo.
+- Vite `server.host: '127.0.0.1'` plus `server.proxy` for `/api` and `/socket.io`. Frontend code uses relative URLs (`/api`), so `VITE_API_URL` / `VITE_SOCKET_URL` go away.
+- Spotify dashboard redirect URI for dev: `http://127.0.0.1:5173/api/auth/spotify/callback` (goes through the Vite proxy to the backend, keeping the cookie on the frontend origin). This replaces the `:3000` value in section 2.
+- Guests on phones: open `http://<laptop-LAN-IP>:5173` and join as guest. Needs Vite `--host` for that session; no Spotify login involved, so no HTTPS needed.
 - One root `.env.example` documents every variable: `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REDIRECT_URI`, `FRONTEND_URL`, `SESSION_SECRET`, `TOKEN_ENCRYPTION_KEY`, `DATABASE_URL`, `REDIS_URL`, `GOOGLE_API_KEY`, `GOOGLE_MODEL`, `RECOMMENDER_URL`, `RECOMMENDER_INTERNAL_TOKEN`.
-- Root `package.json` scripts or a `Makefile`: `dev` (compose up db, redis, and recommender, then run backend and frontend with hot reload), `test`, `lint`.
+- Root scripts (`package.json`, plus `dev.ps1` for Windows): `dev` (compose up deps → `prisma migrate dev` → backend + frontend with hot reload), `test`, `lint`.
+- A `scripts/doctor` check prints what's missing: env vars, Docker running, ports free, Postgres/Redis/recommender reachable, redirect URI format.
 - CI (GitHub Actions): lint, run backend tests (Jest + Supertest + socket.io-client against Testcontainers Postgres/Redis), pytest for the recommender, and the frontend build.
+
+### Later: hosted deployment (Terraform)
+
+Out of scope for now. Keep the code ready for it by reading every URL, secret and origin from env, and by keeping the containers (backend, frontend/nginx, recommender) production-buildable. When this phase starts: Terraform modules for network, compute, managed Postgres and Redis, secrets, DNS and TLS; nginx serving the frontend and proxying `/api` and `/socket.io` on one HTTPS origin; `Secure` session cookies; the production Spotify redirect URI. `deploy-aws.sh` gets replaced by this.
 
 ### Socket event contract (v2)
 
@@ -271,17 +293,21 @@ Also: `song_request_processed` is currently broadcast to the **whole room**, so 
 |---|---|---|---|
 | 1 | **Voting hotfix** (section 1, steps 1–5): ship immediately; independent of everything else | – | S |
 | 2 | Infra: Postgres in compose, Prisma schema and migrations, resilient Redis, health checks | – | M |
-| 3 | Backend-owned Spotify OAuth, sessions, `requireAuth`, socket auth, fixed redirect URI (sections 2 and 3) | 2 | L |
-| 4 | Frontend auth: `AuthProvider`, `/login`, route guards, player token from backend, remove localStorage tokens | 3 | M |
+| 3 | Backend-owned Spotify OAuth, guest sessions, `requireSession` / `requireSpotifyUser`, socket auth, fixed redirect URI (sections 2 and 3) | 2 | L |
+| 4 | Frontend auth: `AuthProvider`, `/login`, guest join form, route guards, player token from backend, remove localStorage tokens | 3 | M |
 | 5 | Rooms, votes, and requests on Postgres + Redis, host-only admin events, socket contract v2 | 3 | L |
 | 6 | Python recommender rewrite (FastAPI, structured output, Spotify matching, Redis cache) + Node thin proxy | 2 | L |
 | 7 | Playlists in DB, export to Spotify, per-user location | 5, 6 | M |
 | 8 | Frontend overhaul (tokens/CSS modules, TanStack Query, toasts, new room/admin/playlist UX) | 4, 5 | L |
-| 9 | Tests, CI, docs refresh (README, QUICKSTART, TROUBLESHOOTING, DEPLOYMENT_CHECKLIST) | all | M |
+| 9 | Tests, CI, localhost dev tooling (`dev` script, doctor), docs refresh (README, QUICKSTART, TROUBLESHOOTING) | all | M |
+| 10 | *Deferred:* Terraform provisioning and hosted deployment | all | L |
 
-## 9. Open decisions
+## 9. Decisions
 
-1. **Guest login:** strict Spotify login for all guests (the Spotify dev-mode allowlist applies), or signed invite links for guests later? The plan assumes strict.
-2. **ORM:** Prisma (recommended) or Knex/raw SQL.
-3. **LLM provider:** keep Gemini (`GOOGLE_API_KEY`, already in use) or switch. The Python design keeps the provider behind `app/llm.py`, so switching later is a one-file change.
-4. **Hosting target** for HTTPS (needed for phone guests and Spotify redirect): tunnel for dev, and which host for prod (the existing `deploy-aws.sh` targets EC2).
+| Topic | Decision |
+|---|---|
+| Guest login | **Not strict.** Spotify login for hosts and playlist features; guests join with a name and get a server-side guest session (section 3). |
+| ORM | **Prisma.** |
+| LLM provider | **Gemini** (`GOOGLE_API_KEY`), via LangChain in the Python service. Kept behind `app/llm.py`. |
+| Target environment | **Localhost first** (section 7). |
+| Hosting | **Deferred.** Will be provisioned with **Terraform** (milestone 10). |
