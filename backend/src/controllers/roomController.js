@@ -3,35 +3,41 @@ const { config } = require('../config/env');
 const { generateRoomCode } = require('../utils/generateRoomCode');
 const votingService = require('../services/votingService');
 
-// Create a new room
+const MAX_CODE_ATTEMPTS = 5;
+
+// Create a new room hosted by the signed-in Spotify user
 const createRoom = async (req, res) => {
   try {
-    const { adminName } = req.body;
+    let roomId = null;
 
-    if (!adminName || adminName.trim() === '') {
-      return res.status(400).json({ error: 'Admin name is required' });
+    // HSETNX claims a code atomically, so the code of a live room is never reused.
+    for (let attempt = 0; attempt < MAX_CODE_ATTEMPTS && !roomId; attempt += 1) {
+      const candidate = generateRoomCode();
+      if (await redis.hSetNX(`room:${candidate}`, 'hostUserId', req.user.id)) {
+        roomId = candidate;
+      }
     }
 
-    const roomId = generateRoomCode();
+    if (!roomId) {
+      return res.status(503).json({ error: 'Could not allocate a room code. Please try again.' });
+    }
 
-    // Store room data
     await redis.hSet(`room:${roomId}`, {
-      adminName: adminName.trim(),
+      adminName: req.user.displayName,
       createdAt: new Date().toISOString(),
       active: 'true',
       votingOpen: 'true'
     });
-
     await redis.expire(`room:${roomId}`, config.roomTtlSeconds);
 
-    res.status(201).json({
+    return res.status(201).json({
       roomId,
-      adminName: adminName.trim(),
+      adminName: req.user.displayName,
       message: 'Room created successfully'
     });
   } catch (error) {
     console.error('Error creating room:', error);
-    res.status(500).json({ error: 'Failed to create room' });
+    return res.status(500).json({ error: 'Failed to create room' });
   }
 };
 
@@ -39,76 +45,65 @@ const createRoom = async (req, res) => {
 const getRoomDetails = async (req, res) => {
   try {
     const { roomId } = req.params;
-
-    if (!roomId) {
-      return res.status(400).json({ error: 'Room ID is required' });
-    }
-
     const roomData = await redis.hGetAll(`room:${roomId}`);
 
     if (!roomData || Object.keys(roomData).length === 0) {
       return res.status(404).json({ error: 'Room not found' });
     }
 
-    // Get user count
-    const userCount = await redis.sCard(`roomUsers:${roomId}`) || 0;
+    const userCount = await redis.sCard(`roomUsers:${roomId}`);
+    const { hostUserId, ...publicRoomData } = roomData;
 
-    res.json({
+    return res.json({
       roomId,
-      ...roomData,
-      userCount
+      ...publicRoomData,
+      votingOpen: roomData.votingOpen !== 'false',
+      userCount,
+      isHost: hostUserId === req.user.id
     });
   } catch (error) {
     console.error('Error getting room details:', error);
-    res.status(500).json({ error: 'Failed to get room details' });
+    return res.status(500).json({ error: 'Failed to get room details' });
   }
 };
 
-// Join room
+// Join a room as the signed-in user (guest or Spotify)
 const joinRoom = async (req, res) => {
   try {
     const { roomId } = req.params;
-    const { userName } = req.body;
 
-    if (!userName || userName.trim() === '') {
-      return res.status(400).json({ error: 'User name is required' });
-    }
-
-    // Check if room exists
-    const roomExists = await redis.exists(`room:${roomId}`);
-    
-    if (!roomExists) {
+    if (!(await votingService.roomExists(roomId))) {
       return res.status(404).json({ error: 'Room not found' });
     }
 
-    // Add user to room
-    const userId = `${userName.trim()}_${Date.now()}`;
-    await redis.sAdd(`roomUsers:${roomId}`, userId);
-    await votingService.expireWithRoom(roomId, `roomUsers:${roomId}`);
+    await votingService.addRoomMember(roomId, req.user.id);
 
-    res.json({
+    return res.json({
       message: 'Joined room successfully',
       roomId,
-      userId,
-      userName: userName.trim()
+      userId: req.user.id,
+      userName: req.user.displayName
     });
   } catch (error) {
     console.error('Error joining room:', error);
-    res.status(500).json({ error: 'Failed to join room' });
+    return res.status(500).json({ error: 'Failed to join room' });
   }
 };
 
-// Delete room
+// Delete a room (host only)
 const deleteRoom = async (req, res) => {
   try {
     const { roomId } = req.params;
 
-    await votingService.deleteRoomData(roomId);
+    if (!(await votingService.isRoomHost(roomId, req.user.id))) {
+      return res.status(403).json({ error: 'Only the host can delete this room' });
+    }
 
-    res.json({ message: 'Room deleted successfully' });
+    await votingService.deleteRoomData(roomId);
+    return res.json({ message: 'Room deleted successfully' });
   } catch (error) {
     console.error('Error deleting room:', error);
-    res.status(500).json({ error: 'Failed to delete room' });
+    return res.status(500).json({ error: 'Failed to delete room' });
   }
 };
 

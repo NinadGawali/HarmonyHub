@@ -1,6 +1,6 @@
 {
   "name": "harmonyhub-backend",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "HarmonyHub - Real-time Music Voting System Backend",
   "main": "src/server.js",
   "scripts": {
@@ -26,6 +26,7 @@
   "dependencies": {
     "@prisma/client": "6.19.3",
     "axios": "^1.4.0",
+    "cookie": "^0.7.2",
     "cors": "^2.8.5",
     "dotenv": "^16.0.3",
     "express": "^4.18.2",

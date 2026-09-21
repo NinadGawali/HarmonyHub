@@ -1,10 +1,22 @@
+const { prisma } = require('../config/db');
+
 const isValidCoordinate = (value, min, max) =>
   typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max;
 
-let latestLocation = null;
+const optionalText = (value) => (value ? String(value).trim().slice(0, 120) : null);
 
-const receiveLocation = (req, res) => {
-  const { latitude, longitude, accuracy, timestamp, source, city, state } = req.body;
+const toResponse = (location) => ({
+  latitude: location.latitude,
+  longitude: location.longitude,
+  accuracy: location.accuracy,
+  city: location.city || '',
+  state: location.state || '',
+  timestamp: location.updatedAt.toISOString()
+});
+
+// Save the signed-in user's latest location (one row per user)
+const receiveLocation = async (req, res) => {
+  const { latitude, longitude, accuracy, city, state } = req.body || {};
 
   if (!isValidCoordinate(latitude, -90, 90) || !isValidCoordinate(longitude, -180, 180)) {
     return res.status(400).json({
@@ -12,39 +24,42 @@ const receiveLocation = (req, res) => {
     });
   }
 
-  const normalizedPayload = {
-    latitude,
-    longitude,
-    accuracy: typeof accuracy === 'number' && Number.isFinite(accuracy) ? accuracy : null,
-    timestamp: timestamp || new Date().toISOString(),
-    source: source || 'browser-geolocation',
-    city: city ? String(city).trim() : '',
-    state: state ? String(state).trim() : ''
-  };
+  try {
+    const data = {
+      latitude,
+      longitude,
+      accuracy: typeof accuracy === 'number' && Number.isFinite(accuracy) ? accuracy : null,
+      city: optionalText(city),
+      state: optionalText(state)
+    };
 
-  latestLocation = normalizedPayload;
+    const location = await prisma.userLocation.upsert({
+      where: { userId: req.user.id },
+      create: { userId: req.user.id, ...data },
+      update: data
+    });
 
-  // For now, location is accepted and logged. Replace with DB persistence if needed.
-  console.log('📍 Location update received:', normalizedPayload);
-
-  return res.status(200).json({
-    success: true,
-    message: 'Location received',
-    location: normalizedPayload
-  });
+    return res.status(200).json({ success: true, location: toResponse(location) });
+  } catch (error) {
+    console.error('Error saving location:', error);
+    return res.status(500).json({ error: 'Failed to save location' });
+  }
 };
 
-const getLatestLocation = (req, res) => {
-  if (!latestLocation) {
-    return res.status(404).json({
-      error: 'No location has been captured yet.'
-    });
-  }
+// Return the signed-in user's latest location
+const getLatestLocation = async (req, res) => {
+  try {
+    const location = await prisma.userLocation.findUnique({ where: { userId: req.user.id } });
 
-  return res.status(200).json({
-    success: true,
-    location: latestLocation
-  });
+    if (!location) {
+      return res.status(404).json({ error: 'No location has been captured yet.' });
+    }
+
+    return res.status(200).json({ success: true, location: toResponse(location) });
+  } catch (error) {
+    console.error('Error reading location:', error);
+    return res.status(500).json({ error: 'Failed to read location' });
+  }
 };
 
 module.exports = {

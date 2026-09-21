@@ -59,7 +59,13 @@ const hostPort = (url, fallbackPort) => {
     );
   }
 
-  const env = parseEnvFile(path.join(root, '.env'));
+  // Same precedence as the backend: non-empty values in backend/.env override the root .env.
+  const rootEnv = parseEnvFile(path.join(root, '.env'));
+  const backendEnv = parseEnvFile(path.join(root, 'backend', '.env')) || {};
+  const env = rootEnv && {
+    ...rootEnv,
+    ...Object.fromEntries(Object.entries(backendEnv).filter(([, value]) => value))
+  };
   report(Boolean(env), '.env exists at repo root', 'Copy .env.example to .env.');
 
   if (env) {
@@ -69,6 +75,20 @@ const hostPort = (url, fallbackPort) => {
     for (const key of ['SPOTIFY_CLIENT_ID', 'SPOTIFY_CLIENT_SECRET', 'GOOGLE_API_KEY']) {
       report(Boolean(env[key]), `${key} is set`, `Needed for Spotify/AI features. Set ${key} in .env.`, true);
     }
+
+    report(
+      Buffer.from(env.TOKEN_ENCRYPTION_KEY || '', 'base64').length === 32,
+      'TOKEN_ENCRYPTION_KEY is a 32-byte key',
+      'Run `npm run secrets` (needed for Spotify login).',
+      true
+    );
+
+    const redirectUri = env.SPOTIFY_REDIRECT_URI || 'http://127.0.0.1:5173/api/auth/spotify/callback';
+    report(
+      !/\/\/localhost[:/]/.test(redirectUri),
+      `Spotify redirect URI ${redirectUri}`,
+      'Spotify rejects "localhost"; use 127.0.0.1 and register the exact URI in the Spotify dashboard.'
+    );
 
     const services = [
       ['Postgres', hostPort(env.DATABASE_URL, 5432), 'Run `npm run dev:deps`.', false],

@@ -1,22 +1,24 @@
 import { useEffect } from 'react';
 import { socket } from '../socket/socket';
 
-// Joins `roomId` over the shared socket and re-joins after every reconnect,
-// since the server forgets room membership when a connection drops.
-export default function useSocket(roomId, onLeaderboardUpdate, userId = null) {
+// Joins `roomId` over the shared, session-authenticated socket. Pass enabled=false until the
+// user has a session. Re-joins after every reconnect, since the server forgets room membership
+// when a connection drops.
+export default function useSocket(roomId, onLeaderboardUpdate, enabled = true) {
   useEffect(() => {
-    if (!roomId) return undefined;
+    if (!roomId || !enabled) return undefined;
 
-    const join = () => socket.emit('join_room', { roomId, userId });
+    const join = () => socket.emit('join_room', { roomId });
 
-    // If not connected yet, the 'connect' handler performs the first join.
-    if (socket.connected) {
-      join();
-    }
     socket.on('connect', join);
-
     if (onLeaderboardUpdate) {
       socket.on('leaderboard_update', onLeaderboardUpdate);
+    }
+
+    if (socket.connected) {
+      join();
+    } else {
+      socket.connect();
     }
 
     return () => {
@@ -26,7 +28,7 @@ export default function useSocket(roomId, onLeaderboardUpdate, userId = null) {
         socket.off('leaderboard_update', onLeaderboardUpdate);
       }
     };
-  }, [roomId, userId, onLeaderboardUpdate]);
+  }, [roomId, enabled, onLeaderboardUpdate]);
 
   return socket;
 }

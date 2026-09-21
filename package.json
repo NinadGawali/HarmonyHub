@@ -1,6 +1,6 @@
 {
   "name": "harmonyhub",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "HarmonyHub - real-time music voting for parties",
   "license": "MIT",
@@ -16,7 +16,8 @@
     "dev:web": "concurrently -k -n backend,frontend -c green,cyan \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
     "db:migrate": "npm run db:migrate --prefix backend",
     "db:studio": "npm run db:studio --prefix backend",
-    "build": "npm run build --prefix frontend"
+    "build": "npm run build --prefix frontend",
+    "secrets": "node scripts/generate-secrets.js"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

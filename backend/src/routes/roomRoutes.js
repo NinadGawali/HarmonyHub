@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const roomController = require('../controllers/roomController');
+const { requireSpotifyUser } = require('../middleware/auth');
 
 // Create a new room
-router.post('/', roomController.createRoom);
+router.post('/', requireSpotifyUser, roomController.createRoom);
 
 // Get room details
 router.get('/:roomId', roomController.getRoomDetails);

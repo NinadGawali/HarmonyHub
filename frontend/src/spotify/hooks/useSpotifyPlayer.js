@@ -1,25 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { SpotifyApiError, spotifyAuthApi, spotifyPlaybackApi } from '../api';
+import { SpotifyApiError, spotifyPlaybackApi } from '../api';
 import { createSpotifyPlayer, destroySpotifyPlayer } from '../player';
-import {
-  getSpotifyRedirectUri,
-  SPOTIFY_OAUTH_RETURN_PATH_KEY,
-  SPOTIFY_OAUTH_STATE_KEY,
-  buildSpotifyAuthFromTokenResponse,
-  clearSpotifyAuth,
-  loadSpotifyAuth,
-  persistSpotifyAuth
-} from '../authStorage';
+import { authAPI } from '../../api/api';
+import { useAuth } from '../../auth/AuthProvider';
 
-function buildOAuthState() {
-  if (window.crypto?.getRandomValues) {
-    const bytes = new Uint8Array(12);
-    window.crypto.getRandomValues(bytes);
-    return Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
-  }
-
-  return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
-}
+// Treat tokens as expired slightly early so requests never race the real expiry.
+const TOKEN_EXPIRY_MARGIN_MS = 30000;
 
 function normalizePlayerState(state) {
   if (!state) {
@@ -44,7 +30,7 @@ function sleep(ms) {
 export default function useSpotifyPlayer(options = {}) {
   const playerName = options.playerName || 'HarmonyHub Player';
 
-  const [auth, setAuth] = useState(() => loadSpotifyAuth());
+  const { isSpotifyUser, loginWithSpotify, logout: logoutUser } = useAuth();
   const [player, setPlayer] = useState(null);
   const [deviceId, setDeviceId] = useState(null);
   const [playerReady, setPlayerReady] = useState(false);
@@ -52,13 +38,10 @@ export default function useSpotifyPlayer(options = {}) {
   const [error, setError] = useState('');
   const [playbackState, setPlaybackState] = useState(null);
 
-  const authRef = useRef(auth);
+  // { accessToken, expiresAt } issued by the backend, which holds the refresh token.
+  const tokenRef = useRef(null);
   const playerRef = useRef(player);
   const deviceIdRef = useRef(deviceId);
-
-  useEffect(() => {
-    authRef.current = auth;
-  }, [auth]);
 
   useEffect(() => {
     playerRef.current = player;
@@ -85,47 +68,40 @@ export default function useSpotifyPlayer(options = {}) {
     throw new Error('Spotify device is not ready yet');
   }, []);
 
-  const updateAuth = useCallback((nextAuth) => {
-    if (nextAuth) {
-      persistSpotifyAuth(nextAuth);
-      setAuth(nextAuth);
-      return;
+  const fetchAccessToken = useCallback(async () => {
+    try {
+      const response = await authAPI.getSpotifyToken();
+      tokenRef.current = response.data;
+      return response.data.accessToken;
+    } catch (tokenError) {
+      tokenRef.current = null;
+      if (tokenError.response?.status === 401) {
+        return null;
+      }
+      throw tokenError;
     }
-
-    clearSpotifyAuth();
-    setAuth(null);
   }, []);
 
   const refreshSession = useCallback(async () => {
-    const currentAuth = authRef.current;
-    if (!currentAuth?.refreshToken) {
-      throw new Error('Spotify session expired. Please reconnect Spotify.');
+    const accessToken = await fetchAccessToken();
+    if (!accessToken) {
+      throw new Error('Spotify session expired. Please log in with Spotify again.');
     }
-
-    const refreshed = await spotifyAuthApi.refreshAccessToken(currentAuth.refreshToken);
-    const nextAuth = buildSpotifyAuthFromTokenResponse(refreshed, currentAuth.refreshToken);
-    updateAuth(nextAuth);
-    return nextAuth.accessToken;
-  }, [updateAuth]);
+    return accessToken;
+  }, [fetchAccessToken]);
 
   const getValidAccessToken = useCallback(async () => {
-    const currentAuth = authRef.current;
-    if (!currentAuth?.accessToken) {
+    if (!isSpotifyUser) {
       return null;
     }
 
-    const hasExpired = Date.now() >= Number(currentAuth.expiresAt || 0) - 30000;
-    if (!hasExpired) {
-      return currentAuth.accessToken;
+    const current = tokenRef.current;
+    if (current?.accessToken && Date.now() < current.expiresAt - TOKEN_EXPIRY_MARGIN_MS) {
+      return current.accessToken;
     }
 
-    if (!currentAuth.refreshToken) {
-      updateAuth(null);
-      return null;
-    }
-
-    return refreshSession();
-  }, [refreshSession, updateAuth]);
+    return fetchAccessToken();
+  }, [fetchAccessToken, isSpotifyUser]);
 
   const withTokenRetry = useCallback(async (operation) => {
     const accessToken = await getValidAccessToken();
@@ -191,21 +167,8 @@ export default function useSpotifyPlayer(options = {}) {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       throw new Error('You are offline. Reconnect to the internet before connecting Spotify.');
     }
-
-    const redirectUri = getSpotifyRedirectUri();
-    const state = buildOAuthState();
-
-    // Import saveOAuthState dynamically to avoid circular dependency
-    const { saveOAuthState } = await import('../authStorage');
-    saveOAuthState(state, returnPath);
-
-    const response = await spotifyAuthApi.getLoginUrl({
-      redirectUri,
-      state
-    });
-
-    window.location.assign(response.url);
-  }, []);
+    loginWithSpotify(returnPath);
+  }, [loginWithSpotify]);
 
   const initializePlayer = useCallback(async () => {
     if (playerRef.current) {
@@ -374,10 +337,11 @@ export default function useSpotifyPlayer(options = {}) {
 
   const logout = useCallback(async () => {
     await disconnectPlayer();
-    updateAuth(null);
+    tokenRef.current = null;
     setPlaybackState(null);
     setError('');
-  }, [disconnectPlayer, updateAuth]);
+    await logoutUser();
+  }, [disconnectPlayer, logoutUser]);
 
   useEffect(() => {
     return () => {
@@ -386,9 +350,7 @@ export default function useSpotifyPlayer(options = {}) {
   }, []);
 
   return {
-    isAuthenticated: Boolean(auth?.accessToken),
-    accessToken: auth?.accessToken || null,
-    auth,
+    isAuthenticated: isSpotifyUser,
     player,
     deviceId,
     playerReady,

@@ -1,19 +1,28 @@
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
-
+// Same-origin API (proxied to the backend by Vite in dev and nginx in containers).
 const api = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: '/api',
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
+// Auth APIs
+export const authAPI = {
+  me: () => api.get('/auth/me'),
+  joinAsGuest: (displayName) => api.post('/auth/guest', { displayName }),
+  logout: () => api.post('/auth/logout'),
+  getSpotifyToken: () => api.get('/auth/spotify/token'),
+  spotifyLoginUrl: (returnTo = '/') => `/api/auth/spotify/login?returnTo=${encodeURIComponent(returnTo)}`,
+};
+
 // Room APIs
 export const roomAPI = {
-  create: (adminName) => api.post('/rooms', { adminName }),
+  create: () => api.post('/rooms'),
   get: (roomId) => api.get(`/rooms/${roomId}`),
-  join: (roomId, userName) => api.post(`/rooms/${roomId}/join`, { userName }),
+  join: (roomId) => api.post(`/rooms/${roomId}/join`),
   delete: (roomId) => api.delete(`/rooms/${roomId}`),
 };
 
