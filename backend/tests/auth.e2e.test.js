@@ -156,9 +156,9 @@ describe('authentication and authorization', () => {
       socket.emit('vote_song', { roomId, songId: 'spoof', userId: 'someone-else' });
       await first;
 
-      const second = nextEvent(socket, 'vote_rejected');
+      const second = nextEvent(socket, 'vote_success');
       socket.emit('vote_song', { roomId, songId: 'spoof', userId: 'yet-another-id' });
-      assert.equal((await second).code, 'ALREADY_VOTED');
+      assert.equal((await second).voted, false);
 
       admin.close();
       socket.close();

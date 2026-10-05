@@ -65,21 +65,21 @@ describe('party room voting', () => {
     assert.equal((await vote(socket, 's1')).event, 'vote_success');
   });
 
-  it('rejects duplicate votes and votes for unknown songs', async () => {
+  it('retracts a vote and still rejects votes for unknown songs', async () => {
     const socket = await client(guest.cookie);
     await joinRoom(socket, roomId);
 
-    assert.equal((await vote(socket, 's1')).data.code, 'ALREADY_VOTED');
+    assert.equal((await vote(socket, 's1')).event, 'vote_success');
     assert.equal((await vote(socket, 'missing')).data.code, 'SONG_NOT_FOUND');
 
     const { body } = await request('GET', `/api/rooms/${roomId}/leaderboard`, { cookie: guest.cookie });
-    assert.deepEqual(body.leaderboard.map(({ songId, votes }) => ({ songId, votes })), [{ songId: 's1', votes: 1 }]);
+    assert.deepEqual(body.leaderboard.map(({ songId, votes }) => ({ songId, votes })), [{ songId: 's1', votes: 0 }]);
   });
 
   it('restores the user\'s votes on a new connection', async () => {
     const socket = await client(guest.cookie);
     const { songIds } = await joinRoom(socket, roomId);
-    assert.deepEqual(songIds, ['s1']);
+    assert.deepEqual(songIds, []);
   });
 
   it('rejects votes while closed and accepts them after reopening', async () => {
@@ -131,7 +131,7 @@ describe('party room voting', () => {
     let updated = nextEvent(admin, 'leaderboard_update');
     admin.emit('add_song', { roomId, songData: song('s1') });
     const [top] = await updated;
-    assert.equal(top.votes, 2, 're-adding must not reset votes');
+    assert.equal(top.votes, 1, 're-adding must not reset votes');
 
     updated = nextEvent(admin, 'leaderboard_update');
     admin.emit('remove_song', { roomId, songId: 's1' });
