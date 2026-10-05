@@ -104,9 +104,9 @@ module.exports = (io) => {
           return;
         }
 
-        const leaderboard = await votingService.voteSong(roomId, songId, user.id);
+        const { leaderboard, voted } = await votingService.voteSong(roomId, songId, user.id);
         io.to(roomId).emit('leaderboard_update', leaderboard);
-        socket.emit('vote_success', { songId });
+        socket.emit('vote_success', { songId, voted });
       } catch (error) {
         if (error instanceof votingService.VoteError) {
           reject(error.code, error.message);

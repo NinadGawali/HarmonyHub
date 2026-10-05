@@ -43,9 +43,11 @@ export default function useRoomSocket({ roomId, enabled }) {
         setTogglingVoting(false);
       },
       my_votes: ({ songIds }) => setVotedIds(new Set(songIds || [])),
-      vote_success: ({ songId }) => {
+      vote_success: ({ songId, voted }) => {
         setPendingIds((previous) => withoutItem(previous, songId));
-        setVotedIds((previous) => withItem(previous, songId));
+        setVotedIds((previous) => voted
+          ? withItem(previous, songId)
+          : withoutItem(previous, songId));
       },
       vote_rejected: ({ songId, code, message }) => {
         setPendingIds((previous) => withoutItem(previous, songId));

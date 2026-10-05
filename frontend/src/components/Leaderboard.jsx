@@ -103,9 +103,9 @@ export default function Leaderboard({
                     type="button"
                     className={`${styles.voteButton} ${voted ? styles.voted : ''}`}
                     onClick={() => onVote(song.songId)}
-                    disabled={voted || pending || !votingOpen}
+                    disabled={pending || !votingOpen}
                     aria-pressed={voted}
-                    aria-label={voted ? `You voted for ${song.title}` : `Vote for ${song.title}`}
+                    aria-label={voted ? `Retract your vote for ${song.title}` : `Vote for ${song.title}`}
                   >
                     {pending ? <Spinner size={16} /> : voted ? <Check size={18} /> : <ChevronUp size={20} />}
                   </button>
