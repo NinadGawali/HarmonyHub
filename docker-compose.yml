@@ -41,7 +41,9 @@ services:
     profiles: ["full"]
     build: ./backend
     container_name: harmonyhub-backend
-    env_file: .env
+    env_file:
+      - .env
+      - ./backend/.env
     environment:
       NODE_ENV: production
       PORT: 3000
