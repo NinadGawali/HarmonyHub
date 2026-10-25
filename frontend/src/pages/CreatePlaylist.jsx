@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowDown, ArrowUp, Check, ListPlus, Plus, Save, Search, Sparkles, Trash2, Wand2 } from 'lucide-react';
-import { playlistAPI } from '../api/api';
+import { playlistAPI, spotifyAPI } from '../api/api';
 import { createPlaylistRecord, addStoredPlaylist } from '../utils/playlistStorage';
 import TrackRow from '../components/TrackRow';
 import SpotifySearch from '../components/SpotifySearch';
@@ -18,6 +18,16 @@ const PROMPT_IDEAS = [
   'Bollywood wedding dance floor',
   'Rainy day lo-fi to focus'
 ];
+
+const matchRecommendation = async (song) => {
+  try {
+    const { data } = await spotifyAPI.search(`${song.title} ${song.artist}`);
+    const [match] = data.songs || [];
+    return match ? { ...song, ...match } : song;
+  } catch {
+    return song;
+  }
+};
 
 function Composer({ onGenerated }) {
   const [prompt, setPrompt] = useState('');
@@ -92,7 +102,7 @@ function Composer({ onGenerated }) {
   );
 }
 
-function Suggestions({ result, isAdded, onAdd, onAddAll }) {
+function Suggestions({ result, isAdded, onAdd, onAddAll, matching }) {
   const isSpotifyMatch = (song) => Boolean(song.spotifyUrl) && isPlayableTrack(song);
   const remaining = result.songs.filter((song) => isSpotifyMatch(song) && !isAdded(song.songId));
 
@@ -110,8 +120,8 @@ function Suggestions({ result, isAdded, onAdd, onAddAll }) {
       </div>
 
       <div className={styles.suggestionsHeader}>
-        <span>{result.songs.length} suggestions</span>
-        <Button size="sm" variant="secondary" icon={ListPlus} onClick={onAddAll} disabled={!remaining.length}>
+        <span aria-live="polite">{matching ? 'Matching songs on Spotify...' : `${result.songs.length} suggestions`}</span>
+        <Button size="sm" variant="secondary" icon={ListPlus} onClick={onAddAll} disabled={matching || !remaining.length}>
           Add all
         </Button>
       </div>
@@ -197,6 +207,22 @@ export default function CreatePlaylist() {
   const [tab, setTab] = useState('ai');
   const [result, setResult] = useState(null);
   const [playlist, setPlaylist] = useState([]);
+  const [matching, setMatching] = useState(false);
+  const matchingRun = useRef(0);
+
+  const handleGenerated = (generated) => {
+    const run = matchingRun.current + 1;
+    matchingRun.current = run;
+    setResult(generated);
+    setMatching(true);
+
+    Promise.all(generated.songs.map(matchRecommendation)).then((matchedSongs) => {
+      if (matchingRun.current === run) {
+        setResult({ ...generated, songs: matchedSongs });
+        setMatching(false);
+      }
+    });
+  };
 
   const isAdded = (songId) => playlist.some((song) => song.songId === songId);
   const addSong = (song) => setPlaylist((current) => (current.some((item) => item.songId === song.songId) ? current : [...current, song]));
@@ -237,8 +263,8 @@ export default function CreatePlaylist() {
           />
           {tab === 'ai' ? (
             <TabPanel id="ai" idPrefix={TAB_PREFIX}>
-              <Composer onGenerated={setResult} />
-              {result && <Suggestions result={result} isAdded={isAdded} onAdd={addSong} onAddAll={addAll} />}
+              <Composer onGenerated={handleGenerated} />
+              {result && <Suggestions result={result} isAdded={isAdded} onAdd={addSong} onAddAll={addAll} matching={matching} />}
             </TabPanel>
           ) : (
             <TabPanel id="search" idPrefix={TAB_PREFIX}>

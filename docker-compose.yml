@@ -1,6 +1,6 @@
-# Local development:
-#   docker compose up -d                 -> Postgres + Redis (run backend/frontend on the host)
-#   docker compose --profile full up -d  -> everything in containers
+# Docker development and production-like local run:
+#   docker compose --profile full up -d --build -> all services in containers
+#   docker compose --profile full down           -> stop containers (keeps data volumes)
 name: harmonyhub
 
 services:
@@ -37,24 +37,51 @@ services:
       retries: 10
     restart: unless-stopped
 
+  recommender:
+    profiles: ["full"]
+    build: ./backend/python_recommender
+    container_name: harmonyhub-recommender
+    env_file:
+      - path: .env
+        required: false
+      - path: ./backend/.env
+        required: false
+    environment:
+      PYTHON_RECOMMENDER_HOST: 0.0.0.0
+      PYTHON_RECOMMENDER_PORT: 5001
+    expose:
+      - "5001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5001/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
   backend:
     profiles: ["full"]
     build: ./backend
     container_name: harmonyhub-backend
     env_file:
-      - .env
-      - ./backend/.env
+      - path: .env
+        required: false
+      - path: ./backend/.env
+        required: false
     environment:
       NODE_ENV: production
       PORT: 3000
       DATABASE_URL: postgresql://${POSTGRES_USER:-harmonyhub}:${POSTGRES_PASSWORD:-harmonyhub}@postgres:5432/${POSTGRES_DB:-harmonyhub}?schema=public
       REDIS_URL: redis://redis:6379
+      PYTHON_RECOMMENDER_URL: http://recommender:5001
     ports:
       - "3000:3000"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      recommender:
         condition: service_healthy
     restart: unless-stopped
 
