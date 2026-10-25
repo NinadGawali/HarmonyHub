@@ -49,7 +49,7 @@ for env_file in env_files:
         _load_env_fallback(env_file)
 
 CACHE_TTL_SECONDS = int(os.getenv("RECOMMENDER_CACHE_TTL_SECONDS", "300"))
-REQUEST_TIMEOUT_SECONDS = int(os.getenv("RECOMMENDER_REQUEST_TIMEOUT_SECONDS", "12"))
+REQUEST_TIMEOUT_SECONDS = int(os.getenv("RECOMMENDER_REQUEST_TIMEOUT_SECONDS", "18"))
 MODEL_NAME = os.getenv("GOOGLE_MODEL", "gemini-2.5-flash")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "").strip()
 
@@ -153,8 +153,30 @@ def _invoke_model(prompt: str):
         google_api_key=GOOGLE_API_KEY,
         temperature=0.4,
         timeout=REQUEST_TIMEOUT_SECONDS,
+        max_retries=0,
     )
     return model.invoke(prompt)
+
+
+def _invoke_model_with_timeout(prompt: str):
+    result = []
+    failure = []
+
+    def run_model():
+        try:
+            result.append(_invoke_model(prompt))
+        except Exception as error:
+            failure.append(error)
+
+    worker = threading.Thread(target=run_model, daemon=True)
+    worker.start()
+    worker.join(REQUEST_TIMEOUT_SECONDS)
+
+    if worker.is_alive():
+        raise TimeoutError(f'Gemini request exceeded {REQUEST_TIMEOUT_SECONDS} seconds')
+    if failure:
+        raise failure[0]
+    return result[0]
 
 
 def _generate(payload: dict):
@@ -168,7 +190,7 @@ def _generate(payload: dict):
         return {**cached, "fromCache": True}
 
     try:
-        response = _invoke_model(_build_prompt(mood_prompt, artist, count))
+        response = _invoke_model_with_timeout(_build_prompt(mood_prompt, artist, count))
         content = getattr(response, "content", "")
         if isinstance(content, list):
             content = "".join([str(item.get("text", "")) if isinstance(item, dict) else str(item) for item in content])
@@ -198,8 +220,9 @@ def _generate(payload: dict):
         _set_cache(cache_key, result)
         return result
     except Exception as error:
+        print(f'Recommendation generation failed: {error}', flush=True)
         return {
-            "assistantMessage": f"AI provider limit reached or unavailable ({error}). Showing fallback songs.",
+            "assistantMessage": "AI provider is unavailable or slow. Showing fallback songs.",
             "songs": _fallback_songs(mood_prompt, artist, count),
             "usedFallback": True,
         }
