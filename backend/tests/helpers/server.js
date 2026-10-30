@@ -12,9 +12,9 @@ const TEST_PORT = Number(process.env.TEST_PORT || 3999);
 const BASE_URL = `http://127.0.0.1:${TEST_PORT}`;
 const EVENT_TIMEOUT_MS = 4000;
 
-const startServer = async () => {
+const startServer = async (extraEnv = {}) => {
   const child = spawn(process.execPath, [path.join(__dirname, '../../src/server.js')], {
-    env: { ...process.env, PORT: String(TEST_PORT), NODE_ENV: 'test', GUEST_CREATION_LIMIT_PER_HOUR: '10000' },
+    env: { ...process.env, PORT: String(TEST_PORT), NODE_ENV: 'test', GUEST_CREATION_LIMIT_PER_HOUR: '10000', ...extraEnv },
     stdio: ['ignore', 'pipe', 'pipe']
   });
 

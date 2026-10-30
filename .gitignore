@@ -137,3 +137,10 @@ vite.config.ts.timestamp-*
 
 venv/
 __pycache__/
+
+# Python
+.venv/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/

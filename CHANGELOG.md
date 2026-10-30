@@ -3,6 +3,34 @@
 Each phase of the [refinement plan](docs/REFINEMENT_PLAN.md) ships as a tagged, runnable version.
 Check out any version with `git checkout v<version>`.
 
+## [0.6.0] - 2026-10-30 — Phase 6: AI recommender rewrite
+
+Phase 6 shipped before phase 5 (rooms on Postgres), which is still in progress on `phase-5/rooms-postgres`.
+
+### Fixed
+- **AI playlists kept failing and looked rate limited.** Causes: the default model (`gemini-2.5-flash`) was
+  retired, a Google key with an unpaid billing balance was retried on every request, and every error was
+  hidden behind made-up "Vibe Track 1" songs. Retired, rate-limited and rejected models are now detected and
+  skipped with cooldowns, so a broken key costs one call every 10 minutes instead of one per click.
+- AI suggestions are matched to real Spotify tracks on the server, at most 4 searches at a time, with
+  Spotify's `Retry-After` respected. Before, the browser fired up to 15 searches at once, which could get
+  the app rate limited by Spotify.
+- Suggested songs can be played and saved: they now have real Spotify ids instead of `generated_…` ids.
+- Spotify search requests use `limit` 10 at most. Spotify now rejects larger values for development-mode apps.
+
+### Added
+- New `recommender/` service (FastAPI): structured Gemini output, model discovery (`GOOGLE_MODEL` is
+  optional), a Redis cache, shared work for identical requests, an internal token, and a pytest suite.
+- When the AI can't be used, playlists still work: songs come from a Spotify search for the prompt, and the
+  page says why ("AI busy", "AI unavailable").
+- `POST /api/playlists/generate` (the old `/recommendations` path still works for one release), with a
+  per-user limit (`PLAYLIST_GENERATIONS_PER_MINUTE`, default 6).
+- `npm run setup:recommender`, `npm run test:recommender`; `npm run secrets` also creates `RECOMMENDER_INTERNAL_TOKEN`.
+- `recommender` service in `docker compose --profile full`.
+
+### Removed
+- `backend/python_recommender` (Flask + LangChain) and its fake fallback songs.
+
 ## [0.4.0] - 2026-09-21 — Phase 4: frontend redesign
 
 ### Changed

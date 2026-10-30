@@ -1,13 +1,12 @@
 {
   "name": "harmonyhub-backend",
-  "version": "0.4.0",
+  "version": "0.6.0",
   "description": "HarmonyHub - Real-time Music Voting System Backend",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
     "start:prod": "prisma migrate deploy && node src/server.js",
     "dev": "nodemon src/server.js",
-    "dev:recommender": "python python_recommender/app.py",
     "postinstall": "prisma generate",
     "db:migrate": "dotenv -e .env -e ../.env -- prisma migrate dev",
     "db:deploy": "dotenv -e .env -e ../.env -- prisma migrate deploy",

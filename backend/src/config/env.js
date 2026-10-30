@@ -23,7 +23,14 @@ const config = {
   ])],
   databaseUrl: process.env.DATABASE_URL || '',
   redisUrl: process.env.REDIS_URL || 'redis://localhost:6379',
-  recommenderUrl: process.env.PYTHON_RECOMMENDER_URL || 'http://127.0.0.1:5001',
+  recommender: {
+    url: (process.env.PYTHON_RECOMMENDER_URL || 'http://127.0.0.1:5001').replace(/\/+$/, ''),
+    // Shared secret sent as X-Internal-Token; must match the recommender's value.
+    internalToken: process.env.RECOMMENDER_INTERNAL_TOKEN || '',
+    timeoutMs: toInt(process.env.RECOMMENDER_TIMEOUT_MS, 35000),
+    // AI playlist generations per user per minute
+    generationsPerMinute: toInt(process.env.PLAYLIST_GENERATIONS_PER_MINUTE, 6)
+  },
   roomTtlSeconds: toInt(process.env.ROOM_TTL_SECONDS, 24 * 60 * 60),
   // Base64-encoded 32-byte key used to encrypt Spotify refresh tokens at rest.
   tokenEncryptionKey: process.env.TOKEN_ENCRYPTION_KEY || '',

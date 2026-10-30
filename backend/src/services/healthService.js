@@ -25,7 +25,7 @@ const getHealth = async () => {
   const checks = await Promise.all([
     runCheck('postgres', true, () => prisma.$queryRaw`SELECT 1`),
     runCheck('redis', true, () => (redis.isReady ? redis.ping() : Promise.reject(new Error('not connected')))),
-    runCheck('recommender', false, () => axios.get(`${config.recommenderUrl}/health`, { timeout: CHECK_TIMEOUT_MS }))
+    runCheck('recommender', false, () => axios.get(`${config.recommender.url}/health`, { timeout: CHECK_TIMEOUT_MS }))
   ]);
 
   const healthy = checks.every((check) => !check.required || check.status === 'up');

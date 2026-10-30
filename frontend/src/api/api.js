@@ -33,7 +33,7 @@ export const spotifyAPI = {
 
 // Playlist APIs
 export const playlistAPI = {
-  generateRecommendations: (payload) => api.post('/playlists/recommendations', payload),
+  generate: (payload) => api.post('/playlists/generate', payload),
 };
 
 export default api;
