@@ -174,7 +174,7 @@ Admin searches → REST API → Spotify API → Format & Return → Display Resu
 
 - Node.js 20+
 - Docker Desktop (runs Postgres and Redis)
-- Python 3.11+ (optional, AI playlists)
+- Python 3.11+ (for the AI playlist recommender)
 - Spotify app credentials and a Google Gemini API key
 
 ---
@@ -182,8 +182,9 @@ Admin searches → REST API → Spotify API → Format & Return → Display Resu
 ## 🚀 Quick Start
 
 ```bash
-npm run setup            # install dependencies
+npm run setup            # install dependencies (Node + the recommender's Python venv)
 cp .env.example .env     # then add Spotify + Gemini keys
+npm run secrets          # generate local secrets
 npm run dev:deps         # Postgres + Redis in Docker
 npm run db:migrate       # create the database schema
 npm run dev              # backend :3000, frontend :5173, recommender :5001
@@ -207,6 +208,8 @@ All variables are documented in [`.env.example`](.env.example). The main ones:
 | `REDIS_URL` | Redis connection string | `redis://localhost:6379` | Yes |
 | `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` | Spotify app credentials | - | Yes |
 | `GOOGLE_API_KEY` | Gemini key for AI playlists | - | For AI features |
+| `GOOGLE_MODEL` | Preferred Gemini model; empty means the newest available Flash model | - | No |
+| `RECOMMENDER_INTERNAL_TOKEN` | Shared secret between backend and recommender; create with `npm run secrets` | - | Recommended |
 | `PORT` | Backend port | `3000` | No |
 | `FRONTEND_URL` | Where the app is opened; used for redirects after login | `http://127.0.0.1:5173` | No |
 | `SPOTIFY_REDIRECT_URI` | Must match the Spotify dashboard exactly | `${FRONTEND_URL}/api/auth/spotify/callback` | No |

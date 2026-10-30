@@ -94,7 +94,7 @@ const hostPort = (url, fallbackPort) => {
       ['Postgres', hostPort(env.DATABASE_URL, 5432), 'Run `npm run dev:deps`.', false],
       ['Redis', hostPort(env.REDIS_URL, 6379), 'Run `npm run dev:deps`.', false],
       ['Python recommender', hostPort(env.PYTHON_RECOMMENDER_URL || 'http://127.0.0.1:5001', 5001),
-        'Start it with `npm run dev` (AI playlists fall back without it).', true]
+        'Run `npm run setup:recommender` once, then `npm run dev`. Without it, AI playlists return a 503.', true]
     ];
 
     for (const [name, target, hint, optional] of services) {

@@ -3,8 +3,7 @@ const { config } = require('../config/env');
 
 const MIN_COUNT = 4;
 const MAX_COUNT = 15;
-const DEFAULT_COUNT = 8;
-const REQUEST_TIMEOUT_MS = 20000;
+const DEFAULT_COUNT = 10;
 
 class RecommenderUnavailableError extends Error {
   constructor() {
@@ -18,36 +17,43 @@ const normalizeCount = (count) => {
   return Number.isFinite(parsed) ? Math.max(MIN_COUNT, Math.min(MAX_COUNT, Math.round(parsed))) : DEFAULT_COUNT;
 };
 
-// Asks the Python recommender for AI song suggestions.
-const generatePlaylistRecommendations = async ({ moodPrompt, artist, count }) => {
-  const normalizedCount = normalizeCount(count);
+// Same shape as Spotify search results, so the frontend treats both alike.
+const toSong = (track) => ({
+  songId: track.spotify_id,
+  title: track.title,
+  artist: track.artist,
+  album: track.album || '',
+  image: track.image || '',
+  spotifyUrl: track.spotify_url || '',
+  previewUrl: track.preview_url || '',
+  duration: track.duration_ms ?? null,
+  reason: track.reason || '',
+  source: track.source === 'ai' ? 'ai' : 'search'
+});
+
+// Thin client for the Python recommender. All AI work, Spotify matching and caching happen there.
+const generatePlaylist = async ({ prompt, artist, count, market }) => {
+  const headers = config.recommender.internalToken ? { 'X-Internal-Token': config.recommender.internalToken } : {};
 
   let data;
   try {
     ({ data } = await axios.post(
-      `${config.recommenderUrl}/recommend/ai`,
-      { moodPrompt, artist, count: normalizedCount },
-      { timeout: REQUEST_TIMEOUT_MS }
+      `${config.recommender.url}/v1/recommend`,
+      { prompt, artist, count: normalizeCount(count), market: market || null },
+      { headers, timeout: config.recommender.timeoutMs }
     ));
   } catch (error) {
-    console.error('Recommendation request failed:', error.message);
+    const detail = error.response ? `${error.response.status} ${JSON.stringify(error.response.data)}` : error.message;
+    console.error('Recommender request failed:', detail);
     throw new RecommenderUnavailableError();
   }
 
-  const songs = (data?.songs || [])
-    .filter((song) => song?.title && song?.artist)
-    .slice(0, normalizedCount)
-    .map((song) => ({
-      title: String(song.title).trim(),
-      artist: String(song.artist).trim(),
-      reason: song.reason ? String(song.reason).trim() : 'Matches your request.'
-    }));
-
   return {
-    assistantMessage: data?.assistantMessage ? String(data.assistantMessage).trim() : 'Here are your recommendations.',
-    songs,
-    usedFallback: Boolean(data?.usedFallback)
+    message: String(data?.assistant_message || 'Here is your playlist.').trim(),
+    usedFallback: Boolean(data?.used_fallback),
+    fallbackReason: data?.fallback_reason || null,
+    songs: (data?.tracks || []).filter((track) => track?.spotify_id && track?.title).map(toSong)
   };
 };
 
-module.exports = { RecommenderUnavailableError, generatePlaylistRecommendations };
+module.exports = { RecommenderUnavailableError, generatePlaylist, normalizeCount };

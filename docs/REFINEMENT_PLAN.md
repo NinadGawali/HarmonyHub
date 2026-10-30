@@ -192,24 +192,26 @@ Frontend → Node /api/playlists/generate (auth, validate, rate-limit)
 Node → upsert into `tracks`, optionally save as `playlists` row → Frontend
 ```
 
-### Python service changes (`backend/python_recommender` → move to `/recommender`)
+### Python service (`/recommender`), done in v0.6.0
 
-- [ ] Switch Flask to **FastAPI + Uvicorn** for async I/O, Pydantic validation, and an OpenAPI spec.
-- [ ] Structure: `app/main.py`, `app/schemas.py`, `app/llm.py`, `app/spotify.py`, `app/cache.py`, `app/fallback.py`, `app/config.py` (pydantic-settings).
-- [ ] Replace `_extract_json` hacks with `llm.with_structured_output(RecommendationSchema)`.
-- [ ] Use `httpx.AsyncClient` for Spotify. Get a client-credentials token cached in Redis, and run concurrent searches (`asyncio.gather` with a semaphore to respect rate limits and 429 `Retry-After`).
-- [ ] **Real fallbacks:** replace `"Vibe Track N"` with Spotify search on the prompt keywords, the artist, or `genre:`/region terms. Never return fake songs. Note: Spotify's `/recommendations` endpoint is not available to new apps, so the fallback must use search.
-- [ ] Use a Redis cache instead of the in-process dict so it survives restarts and works across workers.
-- [ ] One endpoint `POST /v1/recommend { prompt, artist, count, market }`, plus `GET /health`.
-- [ ] Internal auth: an `X-Internal-Token` header matched against the `RECOMMENDER_INTERNAL_TOKEN` env var. The service is not exposed publicly in compose.
-- [ ] Tests: `pytest` with the LLM and Spotify mocked. Include a golden test for schema parsing and a fallback test.
-- [ ] `Dockerfile` (python:3.12-slim) and a `recommender` service in compose.
+- [x] FastAPI + Uvicorn, Pydantic validation, OpenAPI spec at `/docs`.
+- [x] Structure: `app/main.py`, `schemas.py`, `llm.py`, `spotify.py`, `cache.py`, `fallback.py`, `service.py`, `config.py` (pydantic-settings).
+- [x] Structured output: Gemini `response_schema` with a Pydantic model (no JSON scraping). Uses the official `google-genai` SDK instead of LangChain (see decisions).
+- [x] Model discovery and cooldowns: the newest available Flash model is used unless `GOOGLE_MODEL` is set. Retired (404) and rate-limited (429) models are skipped, and a rejected key (401/403) pauses AI calls for 10 minutes. The SDK's own retries are off.
+- [x] `httpx.AsyncClient` for Spotify: client-credentials token, at most 4 searches at once, 429 `Retry-After` respected, search results cached for a week. Search `limit` is at most 10 (Spotify's development-mode limit).
+- [x] Real fallbacks: Spotify search on prompt keywords and the preferred artist. No fake songs.
+- [x] Redis cache (in-process fallback when Redis is down), and identical requests in flight share one AI call.
+- [x] `POST /v1/recommend { prompt, artist, count, market }` and `GET /health` (reports the AI state).
+- [x] `X-Internal-Token` checked against `RECOMMENDER_INTERNAL_TOKEN`; the service is only exposed inside compose.
+- [x] pytest with Gemini and Spotify mocked, including a golden schema test and fallback tests.
+- [x] `Dockerfile` (python:3.12-slim, non-root) and a `recommender` service in compose.
 
-### Node side
+### Node side, done in v0.6.0
 
-- [ ] Delete fallback logic in `playlistRecommendationService.js`. It becomes a thin client with a timeout. On failure, return a 503 with a friendly message and no fake songs.
-- [ ] Collapse the three recommendation routes into `POST /api/playlists/generate`. Keep the old paths as aliases for one release, or update the frontend at the same time.
-- [ ] Remove `@langchain/google-genai` and `@langchain/langgraph` from `backend/package.json`.
+- [x] `playlistRecommendationService.js` is a thin client with a timeout. On failure it returns a 503 with a friendly message and no fake songs.
+- [x] `POST /api/playlists/generate`, with `/recommendations` kept as an alias for one release. Per-user limit: `PLAYLIST_GENERATIONS_PER_MINUTE` (default 6).
+- [x] No LangChain packages in `backend/package.json`.
+- [ ] Upsert returned tracks into `tracks`. Moved to milestone 7 (playlists in the database).
 
 ---
 
@@ -295,7 +297,7 @@ Also: `song_request_processed` is currently broadcast to the **whole room**, so 
 | 3 | v0.3.0 | Spotify OAuth on the backend, guest sessions, socket auth, redirect URI fix, frontend auth (sections 2 and 3) | Done |
 | 4 | v0.4.0 | Frontend redesign (design system, CSS modules, shared playback, new pages) and removal of location-based playlists | Done |
 | 5 | v0.5.0 | Rooms, votes and requests on Postgres + Redis, guest-to-Spotify vote merge, socket contract v2 | Next |
-| 6 | v0.6.0 | Python recommender rewrite (FastAPI, structured output, Spotify matching, Redis cache) + Node thin proxy | |
+| 6 | v0.6.0 | Python recommender rewrite (FastAPI, structured output, Spotify matching, Redis cache) + Node thin proxy | Done (shipped before 5) |
 | 7 | v0.7.0 | Playlists in the database, export to Spotify | |
 | 8 | v0.8.0 | Tests, CI, docs refresh | |
 | 9 | later | Terraform provisioning and hosted deployment | Deferred |
@@ -306,7 +308,7 @@ Also: `song_request_processed` is currently broadcast to the **whole room**, so 
 |---|---|
 | Guest login | **Not strict.** Spotify login for hosts and playlist features; guests join with a name and get a server-side guest session (section 3). |
 | ORM | **Prisma.** |
-| LLM provider | **Gemini** (`GOOGLE_API_KEY`), via LangChain in the Python service. Kept behind `app/llm.py`. |
+| LLM provider | **Gemini** (`GOOGLE_API_KEY`), via the official `google-genai` SDK in the Python service (LangChain dropped in v0.6.0: one fewer dependency layer, and native structured output and model listing). Kept behind `app/llm.py`. |
 | Target environment | **Localhost first** (section 7). |
 | Hosting | **Deferred.** Will be provisioned with **Terraform** (milestone 9). |
 | Location playlists | **Removed** (v0.4.0). |

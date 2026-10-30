@@ -10,6 +10,13 @@ import { Badge, Button, Card, CardHeader, EmptyState, TabPanel, Tabs, TextArea, 
 import styles from './CreatePlaylist.module.css';
 
 const TAB_PREFIX = 'create';
+// Badge shown when the AI was skipped and the songs came from Spotify search.
+const FALLBACK_BADGES = {
+  ai_rate_limited: 'AI busy: songs from Spotify search',
+  ai_not_configured: 'AI not set up: songs from Spotify search'
+};
+const DEFAULT_FALLBACK_BADGE = 'AI unavailable: songs from Spotify search';
+
 const PROMPT_IDEAS = [
   'Late-night drive with synthwave and dream pop',
   'Sunday morning acoustic coffee',
@@ -35,10 +42,10 @@ function Composer({ onGenerated }) {
     setGenerating(true);
     setError('');
     try {
-      const { data } = await playlistAPI.generateRecommendations({ description: prompt.trim(), artist: artist.trim(), count });
+      const { data } = await playlistAPI.generate({ prompt: prompt.trim(), artist: artist.trim(), count });
       onGenerated({ prompt: prompt.trim(), ...data });
     } catch (err) {
-      setError(err.response?.data?.error || 'Could not generate recommendations. Please try again.');
+      setError(err.response?.data?.error || 'Could not generate a playlist. Please try again.');
     } finally {
       setGenerating(false);
     }
@@ -102,7 +109,9 @@ function Suggestions({ result, isAdded, onAdd, onAddAll }) {
           <p className={styles.aiPrompt}>&ldquo;{result.prompt}&rdquo;</p>
           <p>{result.message}</p>
           {result.usedFallback && (
-            <Badge tone="warning" className={styles.fallbackBadge}>AI unavailable: placeholder suggestions</Badge>
+            <Badge tone="warning" className={styles.fallbackBadge}>
+              {FALLBACK_BADGES[result.fallbackReason] || DEFAULT_FALLBACK_BADGE}
+            </Badge>
           )}
         </div>
       </div>

@@ -8,7 +8,8 @@ const envPath = path.resolve(__dirname, '..', '.env');
 const examplePath = path.resolve(__dirname, '..', '.env.example');
 
 const secrets = {
-  TOKEN_ENCRYPTION_KEY: () => crypto.randomBytes(32).toString('base64')
+  TOKEN_ENCRYPTION_KEY: () => crypto.randomBytes(32).toString('base64'),
+  RECOMMENDER_INTERNAL_TOKEN: () => crypto.randomBytes(24).toString('hex')
 };
 
 if (!fs.existsSync(envPath)) {

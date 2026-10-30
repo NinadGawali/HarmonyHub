@@ -15,9 +15,10 @@ This gets HarmonyHub running on your machine. Postgres and Redis run in Docker. 
 ```bash
 git clone https://github.com/NinadGawali/HarmonyHub.git
 cd HarmonyHub
-npm run setup                                                  # root, backend and frontend dependencies
-pip install -r backend/python_recommender/requirements.txt     # optional, AI playlists
+npm run setup         # root, backend and frontend dependencies, plus the recommender's Python venv
 ```
+
+`npm run setup` creates `recommender/.venv` with Python 3.11+. If Python isn't installed, the Node part still installs; run `npm run setup:recommender` later.
 
 To run a specific released version, check out its tag first, for example `git checkout v0.2.0`. See [CHANGELOG.md](../CHANGELOG.md).
 
@@ -25,10 +26,12 @@ To run a specific released version, check out its tag first, for example `git ch
 
 ```bash
 cp .env.example .env
-npm run secrets       # generates TOKEN_ENCRYPTION_KEY
+npm run secrets       # generates TOKEN_ENCRYPTION_KEY and RECOMMENDER_INTERNAL_TOKEN
 ```
 
 Fill in `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` and `GOOGLE_API_KEY`. The defaults for everything else work with the Docker setup below.
+
+`GOOGLE_MODEL` is optional. When it is empty, retired or rate limited, the recommender picks another available Gemini Flash model. When Gemini can't be used at all (no key, unpaid billing, every model rate limited), AI playlists still work: the songs come from a Spotify search for the prompt, and the page says so.
 
 In the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard), open your app's settings and add this **exact** redirect URI:
 
@@ -71,7 +74,9 @@ The health check is at http://127.0.0.1:5173/api/health. It returns `200` when P
 | `npm run doctor` | Check Node, Docker, `.env`, and that Postgres/Redis/recommender are reachable |
 | `npm run dev:deps:down` | Stop Postgres and Redis (data is kept in Docker volumes) |
 | `npm run db:studio` | Browse the database in Prisma Studio |
-| `npm test` | Frontend unit tests and backend end-to-end tests (backend needs `dev:deps` running) |
+| `npm test` | Frontend unit tests, backend end-to-end tests (needs `dev:deps` running) and recommender tests |
+| `npm run test:recommender` | Recommender tests only (Gemini and Spotify are mocked) |
+| `npm run setup:recommender` | Create or update the recommender's Python venv |
 | `npm run lint` | Lint the frontend (includes React hooks rules) |
 | `docker compose --profile full up -d --build` | Run backend and frontend in containers too |
 
@@ -81,3 +86,5 @@ See [TROUBLESHOOTING.md](TROUBLESHOOTING.md). The two most common problems:
 
 - **`P1000: Authentication failed` when migrating**: another Postgres is answering on the configured port. Run `npm run doctor` and change `POSTGRES_PORT`/`DATABASE_URL`.
 - **`/health` returns 503**: run `npm run dev:deps`. The backend reconnects to Redis automatically once it's back.
+
+- **AI playlists say "AI unavailable"**: open http://127.0.0.1:5001/health. `ai.state` is `blocked` with Google's message when the key is rejected (for example an unpaid billing balance), and AI calls pause for 10 minutes. `not_configured` means `GOOGLE_API_KEY` is missing.
