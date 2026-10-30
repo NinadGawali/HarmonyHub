@@ -105,7 +105,7 @@ function RoomView({ roomId, room, isSpotifyUser }) {
             <Card className={styles.tips}>
               <h2 className={styles.tipsTitle}>How it works</h2>
               <ul>
-                <li>You get one vote per song. Tap the arrow to vote.</li>
+                <li>Vote once per song. Tap the check again to retract your vote.</li>
                 <li>The list reorders live as votes come in.</li>
                 <li>The host plays the top-voted songs.</li>
               </ul>

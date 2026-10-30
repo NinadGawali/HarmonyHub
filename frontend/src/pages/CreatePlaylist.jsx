@@ -7,6 +7,7 @@ import TrackRow from '../components/TrackRow';
 import SpotifySearch from '../components/SpotifySearch';
 import { useToast } from '../components/Toast';
 import { Badge, Button, Card, CardHeader, EmptyState, TabPanel, Tabs, TextArea, TextInput } from '../components/ui';
+import { isPlayableTrack } from '../utils/queue';
 import styles from './CreatePlaylist.module.css';
 
 const TAB_PREFIX = 'create';
@@ -98,8 +99,10 @@ function Composer({ onGenerated }) {
   );
 }
 
+// Songs arrive already matched to Spotify by the recommender.
 function Suggestions({ result, isAdded, onAdd, onAddAll }) {
-  const remaining = result.songs.filter((song) => !isAdded(song.songId));
+  const isSpotifyMatch = (song) => isPlayableTrack(song);
+  const remaining = result.songs.filter((song) => isSpotifyMatch(song) && !isAdded(song.songId));
 
   return (
     <div className={styles.suggestions}>
@@ -117,7 +120,7 @@ function Suggestions({ result, isAdded, onAdd, onAddAll }) {
       </div>
 
       <div className={styles.suggestionsHeader}>
-        <span>{result.songs.length} suggestions</span>
+        <span aria-live="polite">{`${result.songs.length} suggestions`}</span>
         <Button size="sm" variant="secondary" icon={ListPlus} onClick={onAddAll} disabled={!remaining.length}>
           Add all
         </Button>
@@ -136,8 +139,10 @@ function Suggestions({ result, isAdded, onAdd, onAddAll }) {
                   type="button"
                   className={`${styles.roundButton} ${added ? styles.added : ''}`}
                   onClick={() => onAdd(song)}
-                  disabled={added}
-                  aria-label={added ? `${song.title} is in your playlist` : `Add ${song.title}`}
+                  disabled={added || !isSpotifyMatch(song)}
+                  aria-label={added
+                    ? `${song.title} is in your playlist`
+                    : isSpotifyMatch(song) ? `Add ${song.title}` : `${song.title} was not found on Spotify`}
                 >
                   {added ? <Check size={18} /> : <Plus size={18} />}
                 </button>
@@ -205,7 +210,7 @@ export default function CreatePlaylist() {
 
   const isAdded = (songId) => playlist.some((song) => song.songId === songId);
   const addSong = (song) => setPlaylist((current) => (current.some((item) => item.songId === song.songId) ? current : [...current, song]));
-  const addAll = () => result.songs.forEach(addSong);
+  const addAll = () => result.songs.filter(isPlayableTrack).forEach(addSong);
   const removeSong = (songId) => setPlaylist((current) => current.filter((song) => song.songId !== songId));
   const moveSong = (index, direction) => setPlaylist((current) => {
     const next = [...current];

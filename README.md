@@ -181,14 +181,40 @@ Admin searches → REST API → Spotify API → Format & Return → Display Resu
 
 ## 🚀 Quick Start
 
-```bash
-npm run setup            # install dependencies (Node + the recommender's Python venv)
-cp .env.example .env     # then add Spotify + Gemini keys
-npm run secrets          # generate local secrets
-npm run dev:deps         # Postgres + Redis in Docker
-npm run db:migrate       # create the database schema
-npm run dev              # backend :3000, frontend :5173, recommender :5001
+### Run the complete stack with Docker
+
+From the repository root:
+
+```powershell
+npm run setup            # Node dependencies + the recommender's Python venv
+Copy-Item .env.example .env
+npm run secrets          # TOKEN_ENCRYPTION_KEY and RECOMMENDER_INTERNAL_TOKEN
+# Edit .env and add your Spotify and Gemini keys.
+docker compose --profile full up -d --build
 ```
+
+Open `http://localhost:5173`.
+
+Check all services:
+
+```powershell
+docker compose ps
+Invoke-WebRequest http://localhost:5173/
+Invoke-WebRequest http://localhost:3000/health
+```
+
+The backend health response should report PostgreSQL, Redis, and the recommender as `up`.
+
+View logs or stop the stack:
+
+```powershell
+docker compose --profile full logs -f
+docker compose --profile full down
+```
+
+The `down` command keeps the PostgreSQL and Redis volumes. Add `-v` only when you intentionally want to delete local database data.
+
+For local development with hot reload, use `npm run dev` after starting only the database dependencies with `docker compose up -d --wait`.
 
 Full guide: [docs/QUICKSTART.md](docs/QUICKSTART.md). Released versions are tagged. Run `git checkout v0.2.0` for a specific one, and see [CHANGELOG.md](CHANGELOG.md) for what each contains.
 
@@ -403,25 +429,23 @@ npm run build
 
 ### Using Docker Compose (Recommended)
 
-```bash
-# Create .env file in root directory
-cp backend/.env.example backend/.env
-# Edit backend/.env with your Spotify credentials
+The Compose stack runs PostgreSQL, Redis, the Python recommender, the Node backend, and the Nginx frontend:
 
-# Start all services
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
-
-# Stop all services
-docker-compose down
+```powershell
+docker compose --profile full up -d --build
+docker compose --profile full ps
+docker compose --profile full logs -f backend recommender
+docker compose --profile full down
 ```
 
 Services:
+- **PostgreSQL**: `localhost:5432`
 - **Redis**: `localhost:6379`
+- **Python recommender**: internal Compose address `http://recommender:5001`
 - **Backend**: `localhost:3000`
 - **Frontend**: `localhost:5173`
+
+The backend uses the Compose service name `recommender`, not `127.0.0.1`, because each container has its own loopback network. Both `.env` and `backend/.env` are loaded; values in `backend/.env` override duplicate values from the root `.env`.
 
 ### Manual Docker Build
 
@@ -429,7 +453,7 @@ Services:
 ```bash
 cd backend
 docker build -t harmonyhub-backend .
-docker run -d -p 3000:3000 --env-file .env harmonyhub-backend
+docker run -d -p 3000:3000 --env-file ../.env --env-file .env harmonyhub-backend
 ```
 
 **Frontend:**
@@ -438,6 +462,8 @@ cd frontend
 docker build -t harmonyhub-frontend .
 docker run -d -p 5173:80 harmonyhub-frontend
 ```
+
+The individual `docker run` commands do not create the Compose network or start PostgreSQL, Redis, and the recommender. Use the Compose commands above for a complete working stack.
 
 ---
 

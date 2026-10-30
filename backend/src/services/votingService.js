@@ -31,7 +31,7 @@ class VoteError extends Error {
   }
 }
 
-// Vote for a song (one vote per user per song)
+// Toggle a user's vote for a song.
 const voteSong = async (roomId, songId, userId) => {
   try {
     // Reject votes for songs that are not in the room; ZINCRBY would otherwise re-add them.
@@ -40,19 +40,23 @@ const voteSong = async (roomId, songId, userId) => {
       throw new VoteError('SONG_NOT_FOUND', 'This song is no longer in the room');
     }
 
-    // SADD returns 0 when the member already exists, which makes the duplicate check atomic.
-    const added = await redis.sAdd(`votes:${roomId}:${songId}`, userId);
-    if (!added) {
-      throw new VoteError('ALREADY_VOTED', 'You have already voted for this song');
+    const voteKey = `votes:${roomId}:${songId}`;
+    const removed = await redis.sRem(voteKey, userId);
+    const voted = removed === 0;
+
+    if (voted) {
+      await redis.sAdd(voteKey, userId);
+      await redis.zIncrBy(`leaderboard:${roomId}`, 1, songId);
+    } else {
+      await redis.zIncrBy(`leaderboard:${roomId}`, -1, songId);
     }
 
-    await redis.zIncrBy(`leaderboard:${roomId}`, 1, songId);
     await expireWithRoom(roomId, `votes:${roomId}:${songId}`);
 
     // Get updated leaderboard
     const leaderboard = await getLeaderboard(roomId);
     
-    return leaderboard;
+    return { leaderboard, voted };
   } catch (error) {
     if (!(error instanceof VoteError)) {
       console.error('Error voting for song:', error);

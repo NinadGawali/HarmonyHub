@@ -1,6 +1,6 @@
-# Local development:
-#   docker compose up -d                 -> Postgres + Redis (run backend/frontend on the host)
-#   docker compose --profile full up -d  -> everything in containers
+# Docker development and production-like local run:
+#   docker compose --profile full up -d --build -> all services in containers
+#   docker compose --profile full down           -> stop containers (keeps data volumes)
 name: harmonyhub
 
 services:
@@ -68,7 +68,11 @@ services:
     profiles: ["full"]
     build: ./backend
     container_name: harmonyhub-backend
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false
+      - path: ./backend/.env
+        required: false
     environment:
       NODE_ENV: production
       PORT: 3000
