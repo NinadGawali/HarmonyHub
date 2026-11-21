@@ -10,7 +10,7 @@
 
 **A production-ready, real-time music voting platform for parties and events**
 
-[Features](#-features) • [Tech Stack](#-tech-stack) • [Quick Start](#-quick-start) • [Deployment](#-deployment-aws-free-tier) • [API Docs](#-api-documentation)
+[Features](#-features) • [Tech Stack](#-tech-stack) • [Quick Start](#-quick-start) • [Deployment](#️-deployment-aws-ec2) • [API Docs](#-api-documentation)
 
 </div>
 
@@ -28,7 +28,7 @@
 - [Development](#-development)
 - [Production Build](#-production-build)
 - [Docker Deployment](#-docker-deployment)
-- [AWS Deployment](#-deployment-aws-free-tier)
+- [AWS Deployment](#️-deployment-aws-ec2)
 - [API Documentation](#-api-documentation)
 - [Future Features](#-future-features)
 - [Troubleshooting](#-troubleshooting)
@@ -114,7 +114,7 @@ HarmonyHub is a scalable, real-time music voting system inspired by Spotify. Use
 - **Docker & Docker Compose** - Containerization
 - **Nginx** - Frontend server
 - **PM2** - Process management (production)
-- **AWS EC2** - Hosting (free tier)
+- **AWS EC2** - Hosting (Docker compose + Caddy)
 
 ---
 
@@ -467,230 +467,17 @@ The individual `docker run` commands do not create the Compose network or start 
 
 ---
 
-## ☁️ Deployment (AWS Free Tier)
+## ☁️ Deployment (AWS EC2)
 
-Deploy HarmonyHub on AWS EC2 completely **FREE** using the free tier!
-
-### Prerequisites
-
-- AWS Account ([Sign up](https://aws.amazon.com/free/))
-- Basic terminal knowledge
-
-### Step 1: Launch EC2 Instance
-
-1. **Login to AWS Console** → EC2 Dashboard → Launch Instance
-
-2. **Configure Instance:**
-   - **Name:** `HarmonyHub-Server`
-   - **AMI:** Ubuntu Server 22.04 LTS (Free tier eligible)
-   - **Instance Type:** `t2.micro` (1 vCPU, 1 GB RAM) ✓ Free tier
-   - **Key Pair:** Create new or use existing (download .pem file)
-   - **Network Settings:**
-     - Allow SSH (port 22) from your IP
-     - Allow HTTP (port 80) from anywhere (0.0.0.0/0)
-     - Allow HTTPS (port 443) from anywhere
-     - Allow Custom TCP (port 3000) from anywhere
-     - Allow Custom TCP (port 5173) from anywhere
-
-3. **Storage:** 8 GB gp2 (Free tier: up to 30 GB)
-
-4. **Launch Instance**
-
-### Step 2: Connect to EC2
+HarmonyHub runs on one EC2 instance (t3.small) at **`https://<elastic-ip>`**, with no domain needed.
+Caddy gets a free Let's Encrypt certificate for the IP, and docker compose runs the rest.
 
 ```bash
-# Windows (PowerShell)
-ssh -i "your-key.pem" ubuntu@your-ec2-public-ip
-
-# macOS/Linux
-chmod 400 your-key.pem
-ssh -i your-key.pem ubuntu@your-ec2-public-ip
+./deploy/setup-ec2.sh    # once: Docker, swap, security updates
+./deploy/deploy.sh       # every release (or ./deploy/deploy.sh v0.9.0)
 ```
 
-### Step 3: Install Dependencies
-
-```bash
-# Update system
-sudo apt update && sudo apt upgrade -y
-
-# Install Node.js 18
-curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-sudo apt install -y nodejs
-
-# Install Redis
-sudo apt install -y redis-server
-sudo systemctl start redis
-sudo systemctl enable redis
-
-# Install PM2 (Process Manager)
-sudo npm install -g pm2
-
-# Install Nginx (optional, for reverse proxy)
-sudo apt install -y nginx
-```
-
-### Step 4: Clone and Setup
-
-```bash
-# Clone repository
-git clone <your-repo-url>
-cd HarmonyHub
-
-# Setup Backend
-cd backend
-npm install
-cp .env.example .env
-nano .env  # Edit with your credentials
-```
-
-**Update backend/.env for production:**
-```env
-PORT=3000
-REDIS_URL=redis://localhost:6379
-SPOTIFY_CLIENT_ID=your_client_id
-SPOTIFY_CLIENT_SECRET=your_client_secret
-CORS_ORIGIN=http://your-ec2-public-ip:5173
-NODE_ENV=production
-```
-
-```bash
-# Setup Frontend
-cd ../frontend
-npm install
-cp .env.example .env
-nano .env  # Edit with your EC2 public IP
-```
-
-**Update frontend/.env for production:**
-```env
-VITE_API_URL=http://your-ec2-public-ip:3000/api
-VITE_SOCKET_URL=http://your-ec2-public-ip:3000
-```
-
-```bash
-# Build frontend
-npm run build
-```
-
-### Step 5: Run with PM2
-
-```bash
-# Start backend
-cd ~/HarmonyHub/backend
-pm2 start src/server.js --name harmonyhub-backend
-
-# Serve frontend with simple HTTP server
-cd ~/HarmonyHub/frontend
-npm install -g serve
-pm2 start "serve -s dist -l 5173" --name harmonyhub-frontend
-
-# Save PM2 configuration
-pm2 save
-pm2 startup
-# Run the command PM2 outputs
-
-# Check status
-pm2 status
-pm2 logs
-```
-
-### Step 6: Configure Nginx (Optional - Better Performance)
-
-```bash
-sudo nano /etc/nginx/sites-available/harmonyhub
-```
-
-**Nginx configuration:**
-```nginx
-# Backend
-server {
-    listen 80;
-    server_name api.yourdomain.com;  # Or use IP
-
-    location / {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
-    }
-}
-
-# Frontend
-server {
-    listen 80;
-    server_name yourdomain.com;  # Or use IP
-
-    root /home/ubuntu/HarmonyHub/frontend/dist;
-    index index.html;
-
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-}
-```
-
-```bash
-# Enable configuration
-sudo ln -s /etc/nginx/sites-available/harmonyhub /etc/nginx/sites-enabled/
-sudo nginx -t
-sudo systemctl restart nginx
-```
-
-### Step 7: Free SSL with Let's Encrypt (Optional)
-
-```bash
-# Install Certbot
-sudo apt install certbot python3-certbot-nginx -y
-
-# Get SSL certificate (requires domain name)
-sudo certbot --nginx -d yourdomain.com -d www.yourdomain.com
-
-# Auto-renewal is set up automatically
-# Test renewal:
-sudo certbot renew --dry-run
-```
-
-### Step 8: Monitoring & Management
-
-```bash
-# View logs
-pm2 logs harmonyhub-backend
-pm2 logs harmonyhub-frontend
-
-# Restart services
-pm2 restart harmonyhub-backend
-pm2 restart harmonyhub-frontend
-
-# Monitor resources
-pm2 monit
-
-# Check Redis
-redis-cli ping
-redis-cli info stats
-```
-
-### Cost Breakdown (Free Tier)
-
-| Service | Free Tier Limit | Cost After |
-|---------|----------------|------------|
-| EC2 t2.micro | 750 hours/month (12 months) | ~$8/month |
-| EBS Storage | 30 GB/month | $0.10/GB/month |
-| Data Transfer | 15 GB out/month | $0.09/GB |
-| Elastic IP | Free while instance running | $0.005/hour when stopped |
-
-**First Year:** FREE ✅  
-**After Free Tier:** ~$10-15/month
-
-### Scaling Tips
-
-**For Higher Traffic:**
-- Upgrade to t2.small or t2.medium
-- Use AWS RDS for Redis (ElastiCache)
-- Add Application Load Balancer
-- Use CloudFront CDN for frontend
-- Implement Redis clustering
+The full guide (AWS setup, Spotify dashboard, `.env`, backups, troubleshooting) is in [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ---
 

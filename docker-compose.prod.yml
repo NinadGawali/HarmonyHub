@@ -1,0 +1,56 @@
+# Production override for a single server (AWS EC2) reached at https://<PUBLIC_IP>.
+# Only Caddy publishes ports; everything else stays on the internal network.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile full up -d --build
+#
+# deploy/deploy.sh runs this for you. Settings come from the repo-root .env (see docs/DEPLOY.md).
+
+x-logging: &logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  postgres:
+    <<: *logging
+    ports: !reset []
+
+  redis:
+    <<: *logging
+    ports: !reset []
+
+  recommender:
+    <<: *logging
+
+  backend:
+    <<: *logging
+    ports: !reset []
+
+  frontend:
+    <<: *logging
+    ports: !reset []
+
+  caddy:
+    <<: *logging
+    profiles: ["full"]
+    image: caddy:2.11.9
+    container_name: harmonyhub-caddy
+    environment:
+      PUBLIC_IP: ${PUBLIC_IP:?Set PUBLIC_IP in .env to the server's Elastic IP}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/${CADDYFILE:-Caddyfile}:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - frontend
+    restart: unless-stopped
+
+volumes:
+  caddy-data:
+  caddy-config:

@@ -1,0 +1,18 @@
+# HTTPS for the bare server IP with a free Let's Encrypt IP-address certificate.
+# IP certificates are short-lived (about 6 days); Caddy renews them automatically.
+# Certificates are stored in the caddy-data volume, so keep that volume between deploys.
+# Browsers send no server name (SNI) when connecting to an IP, and behind Docker or the EC2 Elastic IP NAT
+# the local address differs from PUBLIC_IP, so tell Caddy which certificate to use for such connections.
+{
+	default_sni {$PUBLIC_IP}
+}
+
+https://{$PUBLIC_IP} {
+	tls {
+		issuer acme {
+			profile shortlived
+		}
+	}
+	encode zstd gzip
+	reverse_proxy frontend:80
+}
