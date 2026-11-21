@@ -3,6 +3,25 @@
 Each phase of the [refinement plan](docs/REFINEMENT_PLAN.md) ships as a tagged, runnable version.
 Check out any version with `git checkout v<version>`.
 
+## [0.9.0] - 2026-11-21 — Phase 9: deploy to AWS EC2 on the bare IP
+
+Phase 8 (tests, CI, docs refresh) is still open; this release ships deployment first.
+
+### Added
+- `docker-compose.prod.yml`: production override for one server. Caddy (`caddy:2.11.9`) is the only service
+  with public ports (80, 443 incl. HTTP/3) and serves `https://<PUBLIC_IP>` with a free Let's Encrypt
+  IP-address certificate (`shortlived` profile, renewed automatically). Postgres, Redis, the backend, the
+  recommender and the frontend no longer publish host ports. All services get log rotation.
+- `deploy/Caddyfile` (and `Caddyfile.test` for testing locally with `tls internal`). Uses `default_sni`,
+  because browsers send no SNI for IP addresses and the EC2 Elastic IP is NATed.
+- `deploy/setup-ec2.sh` (Docker, 2 GB swap, automatic security updates) and `deploy/deploy.sh`
+  (pull a branch or tag, build, start, health check over HTTPS).
+- `docs/DEPLOY.md`: AWS, Spotify dashboard, `.env`, operations, nightly `pg_dump` backups, troubleshooting.
+- `PUBLIC_IP` in `.env.example`.
+
+### Removed
+- `deploy-aws.sh` (Node 18 + PM2 without Docker; superseded).
+
 ## [0.7.0] - 2026-11-21 — Save to Spotify and AI room fill
 
 ### Added

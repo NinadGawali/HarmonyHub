@@ -300,7 +300,7 @@ Also: `song_request_processed` is currently broadcast to the **whole room**, so 
 | 6 | v0.6.0 | Python recommender rewrite (FastAPI, structured output, Spotify matching, Redis cache) + Node thin proxy | Done (shipped before 5) |
 | 7 | v0.7.0 | Playlists in the database, export to Spotify | Export + AI room fill done; DB playlists pending |
 | 8 | v0.8.0 | Tests, CI, docs refresh | |
-| 9 | later | Terraform provisioning and hosted deployment | Deferred |
+| 9 | v0.9.0 | Hosted deployment (EC2 + Caddy on the bare IP, see docs/DEPLOY.md) | Done; Terraform still deferred |
 
 ## 9. Decisions
 

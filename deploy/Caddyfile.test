@@ -1,0 +1,13 @@
+# Local test of the production setup: same as Caddyfile, but with Caddy's own local CA
+# (Let's Encrypt cannot issue certificates for 127.0.0.1). Use with CADDYFILE=Caddyfile.test.
+# Browsers send no server name (SNI) when connecting to an IP, and behind Docker or the EC2 Elastic IP NAT
+# the local address differs from PUBLIC_IP, so tell Caddy which certificate to use for such connections.
+{
+	default_sni {$PUBLIC_IP}
+}
+
+https://{$PUBLIC_IP} {
+	tls internal
+	encode zstd gzip
+	reverse_proxy frontend:80
+}
