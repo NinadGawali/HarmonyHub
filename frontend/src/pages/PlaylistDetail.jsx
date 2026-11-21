@@ -4,6 +4,7 @@ import { ArrowLeft, Check, Link2, ListMusic, Play, Shuffle } from 'lucide-react'
 import usePlayback from '../hooks/usePlayback';
 import TrackRow from '../components/TrackRow';
 import PlayerBar from '../components/PlayerBar';
+import SaveToSpotify from '../components/SaveToSpotify';
 import { getPlaylistUrl, getStoredPlaylists } from '../utils/playlistStorage';
 import { isPlayableTrack } from '../utils/queue';
 import { ArtworkMosaic, Button, EmptyState } from '../components/ui';
@@ -51,6 +52,13 @@ function PlaylistView({ playlist }) {
               Play
             </Button>
             <Button size="lg" variant="secondary" icon={Shuffle} onClick={shuffle} disabled={!playable.length}>Shuffle</Button>
+            <SaveToSpotify
+              size="lg"
+              name={playlist.name}
+              description="Made with HarmonyHub."
+              songs={playlist.songs}
+              returnPath={`/library/${playlist.id}`}
+            />
             <Button size="lg" variant="ghost" icon={copied ? Check : Link2} onClick={copyLink}>
               {copied ? 'Copied' : 'Copy link'}
             </Button>

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Check, Inbox, ListMusic, Lock, LockOpen, QrCode, Search, Trophy, X } from 'lucide-react';
+import { Check, Inbox, ListMusic, Lock, LockOpen, QrCode, Search, Sparkles, Trophy, X } from 'lucide-react';
 import { roomAPI } from '../api/api';
 import useRoomSocket from '../hooks/useRoomSocket';
 import usePlayback from '../hooks/usePlayback';
@@ -8,6 +8,8 @@ import Leaderboard from '../components/Leaderboard';
 import PlayerBar from '../components/PlayerBar';
 import ShareRoom from '../components/ShareRoom';
 import SpotifySearch from '../components/SpotifySearch';
+import AiFillPanel from '../components/AiFillPanel';
+import SaveToSpotify from '../components/SaveToSpotify';
 import RoomError from '../components/RoomError';
 import PartyHeader from '../components/layout/PartyHeader';
 import { Button, Card, CardHeader, EmptyState, Modal, PageSpinner, TabPanel, Tabs } from '../components/ui';
@@ -70,6 +72,13 @@ function AdminView({ roomId, room }) {
         actions={(
           <>
             <Button variant="secondary" size="sm" icon={QrCode} onClick={() => setShareOpen(true)}>Invite</Button>
+            <SaveToSpotify
+              size="sm"
+              name={`HarmonyHub party ${roomId}`}
+              description="Songs from a HarmonyHub party, in vote order."
+              songs={room.songs}
+              returnPath={`/admin/${roomId}`}
+            />
             <Button
               variant={room.votingOpen ? 'secondary' : 'primary'}
               size="sm"
@@ -117,15 +126,22 @@ function AdminView({ roomId, room }) {
               onChange={setTab}
               tabs={[
                 { id: 'search', label: 'Add songs', icon: Search },
+                { id: 'ai', label: 'AI', icon: Sparkles },
                 { id: 'requests', label: 'Requests', icon: ListMusic, badge: room.requests.length || null }
               ]}
             />
             <div className={styles.panel}>
-              {tab === 'search' ? (
+              {tab === 'search' && (
                 <TabPanel id="search" idPrefix={TAB_PREFIX}>
                   <SpotifySearch onAdd={room.addSong} isAdded={(songId) => inRoom.has(songId)} />
                 </TabPanel>
-              ) : (
+              )}
+              {tab === 'ai' && (
+                <TabPanel id="ai" idPrefix={TAB_PREFIX}>
+                  <AiFillPanel state={room.aiFillState} onFill={room.aiFill} disabled={!room.connected} />
+                </TabPanel>
+              )}
+              {tab === 'requests' && (
                 <TabPanel id="requests" idPrefix={TAB_PREFIX}>
                   <RequestList requests={room.requests} onApprove={room.approveRequest} onReject={room.rejectRequest} />
                 </TabPanel>

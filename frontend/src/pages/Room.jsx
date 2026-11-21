@@ -11,6 +11,7 @@ import GuestJoin from '../components/GuestJoin';
 import UserMenu from '../components/UserMenu';
 import PartyHeader from '../components/layout/PartyHeader';
 import RoomError from '../components/RoomError';
+import SaveToSpotify from '../components/SaveToSpotify';
 import { Button, Card, CardHeader, PageSpinner, TextInput } from '../components/ui';
 import styles from './Room.module.css';
 
@@ -87,6 +88,16 @@ function RoomView({ roomId, room, isSpotifyUser }) {
                 subtitle={room.songs.length
                   ? `${room.songs.length} songs · ${votesLeft} left to vote on`
                   : 'Waiting for the first song'}
+                action={isSpotifyUser && room.songs.length > 0 && (
+                  <SaveToSpotify
+                    size="sm"
+                    variant="ghost"
+                    name={`HarmonyHub party ${roomId}`}
+                    description="Songs from a HarmonyHub party, in vote order."
+                    songs={room.songs}
+                    returnPath={`/room/${roomId}`}
+                  />
+                )}
               />
             </div>
             <Leaderboard

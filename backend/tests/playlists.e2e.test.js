@@ -1,7 +1,9 @@
 const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('http');
-const { startServer, stopServer, request, createGuestSession, createFixtures } = require('./helpers/server');
+const {
+  startServer, stopServer, request, createGuestSession, createFixtures, connectClient, nextEvent, joinRoom
+} = require('./helpers/server');
 
 const TOKEN = 'test-internal-token';
 const GENERATIONS_PER_MINUTE = 3;
@@ -38,15 +40,53 @@ const startFakeRecommender = () => new Promise((resolve) => {
   server.listen(0, '127.0.0.1', () => resolve({ server, calls, url: `http://127.0.0.1:${server.address().port}` }));
 });
 
+const json = (res, status, body) => {
+  res.writeHead(status, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(body));
+};
+
+// Stands in for the Spotify Web API (create playlist, add items).
+const startFakeSpotify = () => new Promise((resolve) => {
+  const calls = [];
+  const server = http.createServer((req, res) => {
+    let raw = '';
+    req.on('data', (chunk) => { raw += chunk; });
+    req.on('end', () => {
+      const body = raw ? JSON.parse(raw) : {};
+      calls.push({ method: req.method, path: req.url, auth: req.headers.authorization, body });
+      if (req.headers.authorization === 'Bearer revoked') return json(res, 403, { error: { status: 403 } });
+      if (req.method === 'POST' && req.url === '/me/playlists') {
+        return json(res, 201, { id: 'pl1', name: body.name, external_urls: { spotify: 'https://open.spotify.com/playlist/pl1' } });
+      }
+      if (req.method === 'POST' && req.url === '/playlists/pl1/items') return json(res, 201, { snapshot_id: 'snap' });
+      return json(res, 404, { error: { status: 404 } });
+    });
+  });
+  server.listen(0, '127.0.0.1', () => resolve({ server, calls, url: `http://127.0.0.1:${server.address().port}` }));
+});
+
+const TRACK_A = '4cOdK2wGLETKBW3PvgPWqT';
+const TRACK_B = '7ouMYWpwJ422jRcDASZB7P';
+
 describe('AI playlist generation', () => {
   let backend;
   let recommender;
   let fixtures;
   let host;
+  let spotify;
+
+  // Seeds the cached Spotify access token, so no real token refresh happens.
+  const giveAccessToken = (userId, accessToken) => fixtures.redis.set(
+    `spotify:access:${userId}`,
+    JSON.stringify({ accessToken, expiresAt: Date.now() + 3600 * 1000 }),
+    { EX: 600 }
+  );
 
   before(async () => {
     recommender = await startFakeRecommender();
+    spotify = await startFakeSpotify();
     backend = await startServer({
+      SPOTIFY_API_URL: spotify.url,
       PYTHON_RECOMMENDER_URL: recommender.url,
       RECOMMENDER_INTERNAL_TOKEN: TOKEN,
       PLAYLIST_GENERATIONS_PER_MINUTE: String(GENERATIONS_PER_MINUTE)
@@ -59,6 +99,7 @@ describe('AI playlist generation', () => {
     await fixtures.cleanup();
     await stopServer(backend);
     await new Promise((resolve) => recommender.server.close(resolve));
+    await new Promise((resolve) => spotify.server.close(resolve));
   });
 
   it('requires Spotify login and a prompt', async () => {
@@ -102,5 +143,85 @@ describe('AI playlist generation', () => {
       })).status);
     }
     assert.deepEqual(statuses, [...Array(GENERATIONS_PER_MINUTE).fill(200), 429]);
+  });
+
+  it('saves songs as a private playlist in the user Spotify account', async () => {
+    const saver = await fixtures.createSpotifySession('Saver');
+    await giveAccessToken(saver.user.id, 'good-token');
+
+    const response = await request('POST', '/api/playlists/export', {
+      cookie: saver.cookie,
+      body: { name: 'Rainy day', description: 'line one\nline two', trackIds: [TRACK_A, 'not-a-track', TRACK_B, TRACK_A] }
+    });
+    assert.equal(response.status, 201);
+    assert.deepEqual(response.body, {
+      id: 'pl1', name: 'Rainy day', url: 'https://open.spotify.com/playlist/pl1', trackCount: 2
+    });
+
+    const [create, add] = spotify.calls.slice(-2);
+    assert.equal(create.auth, 'Bearer good-token');
+    assert.deepEqual(create.body, { name: 'Rainy day', description: 'line one line two', public: false });
+    assert.equal(add.path, '/playlists/pl1/items');
+    assert.deepEqual(add.body.uris, [`spotify:track:${TRACK_A}`, `spotify:track:${TRACK_B}`]);
+  });
+
+  it('rejects empty exports, guests, and asks to reconnect when Spotify refuses', async () => {
+    const guest = await createGuestSession('Guest saver');
+    fixtures.trackUser(guest.user.id);
+    assert.equal((await request('POST', '/api/playlists/export', { cookie: guest.cookie, body: { trackIds: [TRACK_A] } })).status, 401);
+    assert.equal((await request('POST', '/api/playlists/export', { cookie: host.cookie, body: { trackIds: ['x'] } })).status, 400);
+
+    const revoked = await fixtures.createSpotifySession('Revoked');
+    await giveAccessToken(revoked.user.id, 'revoked');
+    const response = await request('POST', '/api/playlists/export', { cookie: revoked.cookie, body: { trackIds: [TRACK_A] } });
+    assert.equal(response.status, 403);
+    assert.equal(response.body.code, 'SPOTIFY_RECONNECT');
+  });
+
+  it('lets the host fill a room with AI songs, skipping songs already there', async () => {
+    const roomHost = await fixtures.createSpotifySession('AI host');
+    const { body: { roomId } } = await request('POST', '/api/rooms', { cookie: roomHost.cookie });
+    const socket = await connectClient(roomHost.cookie);
+    try {
+      await joinRoom(socket, roomId);
+
+      const updated = nextEvent(socket, 'leaderboard_update');
+      const done = nextEvent(socket, 'ai_fill_done');
+      socket.emit('ai_fill_queue', { roomId, prompt: 'rainy day lo-fi', count: 8 });
+      assert.deepEqual(await done, {
+        added: 1, skipped: 0, message: 'Search results for your prompt.', usedFallback: true
+      });
+      assert.deepEqual((await updated).map((song) => song.songId), [TRACK_A]);
+      assert.deepEqual(recommender.calls.at(-1).body, { prompt: 'rainy day lo-fi', count: 8, market: null });
+
+      const again = nextEvent(socket, 'ai_fill_done');
+      socket.emit('ai_fill_queue', { roomId, prompt: 'rainy day lo-fi' });
+      assert.equal((await again).skipped, 1);
+
+      const error = nextEvent(socket, 'error');
+      socket.emit('ai_fill_queue', { roomId, prompt: '   ' });
+      assert.equal((await error).event, 'ai_fill_queue');
+    } finally {
+      socket.close();
+      await request('DELETE', `/api/rooms/${roomId}`, { cookie: roomHost.cookie });
+    }
+  });
+
+  it('does not let guests fill the room', async () => {
+    const roomHost = await fixtures.createSpotifySession('Host 2');
+    const guest = await createGuestSession('Sneaky');
+    fixtures.trackUser(guest.user.id);
+    const { body: { roomId } } = await request('POST', '/api/rooms', { cookie: roomHost.cookie });
+    await request('POST', `/api/rooms/${roomId}/join`, { cookie: guest.cookie });
+    const socket = await connectClient(guest.cookie);
+    try {
+      await joinRoom(socket, roomId);
+      const error = nextEvent(socket, 'error');
+      socket.emit('ai_fill_queue', { roomId, prompt: 'anything' });
+      assert.match((await error).message, /host/i);
+    } finally {
+      socket.close();
+      await request('DELETE', `/api/rooms/${roomId}`, { cookie: roomHost.cookie });
+    }
   });
 });

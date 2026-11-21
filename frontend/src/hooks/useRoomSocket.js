@@ -27,6 +27,7 @@ export default function useRoomSocket({ roomId, enabled }) {
   const [togglingVoting, setTogglingVoting] = useState(false);
   const [joinError, setJoinError] = useState('');
   const [requestState, setRequestState] = useState({ sending: false, message: '' });
+  const [aiFillState, setAiFillState] = useState({ sending: false, message: '' });
 
   const handleLeaderboard = useCallback((leaderboard) => {
     setSongs(Array.isArray(leaderboard) ? leaderboard : []);
@@ -65,9 +66,20 @@ export default function useRoomSocket({ roomId, enabled }) {
         if (approved) toast.success(message);
         else toast.info(message);
       },
+      ai_fill_done: ({ added, skipped, usedFallback }) => {
+        const message = added
+          ? `Added ${added} song${added === 1 ? '' : 's'}${skipped ? ` (${skipped} already in the room)` : ''}.`
+          : 'Those songs are already in the room. Try a different vibe.';
+        const note = usedFallback ? ' The AI was busy, so these came from a Spotify search.' : '';
+        setAiFillState({ sending: false, message: message + note });
+        if (added) toast.success(`Added ${added} AI song${added === 1 ? '' : 's'}`);
+      },
       error: ({ event, message } = {}) => {
         setTogglingVoting(false);
         setRequestState((previous) => ({ ...previous, sending: false }));
+        if (event === 'ai_fill_queue') {
+          setAiFillState({ sending: false, message: '' });
+        }
         if (event === 'join_room') {
           setJoinError(message || 'Could not join the room');
           return;
@@ -98,6 +110,15 @@ export default function useRoomSocket({ roomId, enabled }) {
     socket.emit('submit_song_request', { roomId, query });
   }, [roomId]);
 
+  const aiFill = useCallback((prompt, count) => {
+    if (!socket.connected) {
+      toast.error('You are offline. Reconnecting...');
+      return;
+    }
+    setAiFillState({ sending: true, message: '' });
+    socket.emit('ai_fill_queue', { roomId, prompt, count });
+  }, [roomId, toast]);
+
   const addSong = useCallback((song) => socket.emit('add_song', { roomId, songData: song }), [roomId]);
   const removeSong = useCallback((songId) => socket.emit('remove_song', { roomId, songId }), [roomId]);
   const approveRequest = useCallback((requestId) => socket.emit('approve_song_request', { roomId, requestId }), [roomId]);
@@ -120,6 +141,8 @@ export default function useRoomSocket({ roomId, enabled }) {
     togglingVoting,
     joinError,
     requestState,
+    aiFillState,
+    aiFill,
     vote,
     submitRequest,
     addSong,

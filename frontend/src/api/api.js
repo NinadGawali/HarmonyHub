@@ -34,6 +34,7 @@ export const spotifyAPI = {
 // Playlist APIs
 export const playlistAPI = {
   generate: (payload) => api.post('/playlists/generate', payload),
+  exportToSpotify: ({ name, description, trackIds }) => api.post('/playlists/export', { name, description, trackIds }),
 };
 
 export default api;

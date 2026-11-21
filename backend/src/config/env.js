@@ -46,7 +46,9 @@ const config = {
   spotify: {
     clientId: process.env.SPOTIFY_CLIENT_ID || '',
     clientSecret: process.env.SPOTIFY_CLIENT_SECRET || '',
-    redirectUri: process.env.SPOTIFY_REDIRECT_URI || `${frontendUrl}/api/auth/spotify/callback`
+    redirectUri: process.env.SPOTIFY_REDIRECT_URI || `${frontendUrl}/api/auth/spotify/callback`,
+    // Overridable so tests can point at a fake Spotify Web API.
+    apiUrl: (process.env.SPOTIFY_API_URL || 'https://api.spotify.com/v1').replace(/\/+$/, '')
   }
 };
 

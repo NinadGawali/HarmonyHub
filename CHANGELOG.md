@@ -3,6 +3,19 @@
 Each phase of the [refinement plan](docs/REFINEMENT_PLAN.md) ships as a tagged, runnable version.
 Check out any version with `git checkout v<version>`.
 
+## [0.7.0] - 2026-11-21 — Save to Spotify and AI room fill
+
+### Added
+- **Save to Spotify.** AI playlists (library page) and party rooms (host panel, and the guest view for
+  Spotify users) can be saved as a private playlist in the user's own Spotify account.
+  `POST /api/playlists/export { name, description?, trackIds }`, up to 200 songs, 5 saves per minute.
+  If Spotify refuses (old login or revoked access), the button turns into "Reconnect Spotify".
+- **AI room fill.** A new "AI" tab in the host panel: describe a vibe and the recommender adds real Spotify
+  songs to the room for guests to vote on. Songs already in the room are skipped. Socket event
+  `ai_fill_queue { roomId, prompt, count }` (host only) replies with `ai_fill_done`; it shares the per-user
+  AI rate limit with playlist generation.
+- `SPOTIFY_API_URL` setting (defaults to the real Web API) so tests can use a fake Spotify server.
+
 ## [0.6.1] - 2026-11-21 — Recommender quality
 
 ### Fixed
