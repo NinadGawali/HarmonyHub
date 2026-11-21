@@ -19,6 +19,11 @@ Phase 8 (tests, CI, docs refresh) is still open; this release ships deployment f
 - `docs/DEPLOY.md`: AWS, Spotify dashboard, `.env`, operations, nightly `pg_dump` backups, troubleshooting.
 - `PUBLIC_IP` in `.env.example`.
 
+- **One-command AWS deploy with Terraform:** `infra/aws-up.sh` creates a VPC, security group (SSH only from
+  the operator's IP), SSH key, t3.small Ubuntu 24.04 instance and Elastic IP in `ap-south-1`, builds the
+  production `.env` from the local `.env` files, uploads the committed code, starts the stack and checks HTTPS.
+  Rerunning it redeploys. `infra/aws-down.sh` destroys everything.
+
 ### Removed
 - `deploy-aws.sh` (Node 18 + PM2 without Docker; superseded).
 

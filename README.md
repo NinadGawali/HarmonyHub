@@ -473,8 +473,8 @@ HarmonyHub runs on one EC2 instance (t3.small) at **`https://<elastic-ip>`**, wi
 Caddy gets a free Let's Encrypt certificate for the IP, and docker compose runs the rest.
 
 ```bash
-./deploy/setup-ec2.sh    # once: Docker, swap, security updates
-./deploy/deploy.sh       # every release (or ./deploy/deploy.sh v0.9.0)
+./infra/aws-up.sh        # Terraform creates the server and deploys the current commit (rerun to redeploy)
+./infra/aws-down.sh      # delete everything
 ```
 
 The full guide (AWS setup, Spotify dashboard, `.env`, backups, troubleshooting) is in [docs/DEPLOY.md](docs/DEPLOY.md).
