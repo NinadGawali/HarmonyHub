@@ -42,23 +42,32 @@ async def search_tracks(
     request: RecommendRequest,
     count: int,
     exclude: Optional[set[str]] = None,
+    seed_artists: Optional[list[str]] = None,
 ) -> list[Track]:
-    """Up to `count` tracks matching the prompt keywords and the preferred artist."""
+    """Up to `count` tracks: the preferred artist, then artists the AI already picked, then prompt keywords."""
     exclude = set(exclude or ())
     words = keywords(request.prompt)
-    queries: list[tuple[str, int, str]] = []  # (query, offset, reason)
+    # Artist queries fill the list first; keyword queries only fill what is left.
+    queries: list[tuple[str, int, str, str]] = []  # (query, offset, reason, artist the results must include)
     if request.artist:
-        queries.append((f'artist:"{quote(request.artist)}"', 0, f"By {request.artist}, your preferred artist."))
+        queries.append((f'artist:"{quote(request.artist)}"', 0, f"By {request.artist}, your preferred artist.", request.artist))
+    # Songs by artists the AI chose fit the prompt far better than a keyword search does.
+    for artist in seed_artists or []:
+        if normalize(artist) != normalize(request.artist):
+            queries.append((f'artist:"{quote(artist)}"', 0, f"More from {artist}, who fits this playlist.", artist))
     if words:
         phrase = " ".join(words)
-        queries.append((phrase, 0, f"Spotify search match for “{phrase}”."))
-        queries.append((phrase, SEARCH_LIMIT, f"Spotify search match for “{phrase}”."))
+        queries.append((phrase, 0, f"Spotify search match for “{phrase}”.", ""))
+        queries.append((phrase, SEARCH_LIMIT, f"Spotify search match for “{phrase}”.", ""))
         if len(words) > 1:
-            queries.append((words[0], 0, f"Spotify search match for “{words[0]}”."))
+            queries.append((words[0], 0, f"Spotify search match for “{words[0]}”.", ""))
 
-    results: list[list[dict]] = []
+    artist_results: list[list[dict]] = []
+    keyword_results: list[list[dict]] = []
     reasons: dict[str, str] = {}
-    for query, offset, reason in queries:
+    for query, offset, reason, artist in queries:
+        if not artist and len({i["id"] for r in artist_results for i in r} - exclude) >= count:
+            break  # artist searches already found enough songs
         try:
             items = await spotify.search(query, SEARCH_LIMIT, request.market, offset)
         except SpotifyRateLimited:
@@ -66,13 +75,17 @@ async def search_tracks(
         except Exception as error:
             log.warning("Fallback search %r failed: %s", query, error)
             continue
+        if artist:
+            # Spotify's artist: filter is fuzzy ("WYS" also finds "WUYS"), so keep exact artist matches only.
+            wanted = normalize(artist)
+            items = [i for i in items if any(normalize(a.get("name", "")) == wanted for a in i.get("artists", []))]
         for item in items:
             reasons.setdefault(item["id"], reason)
-        results.append(items)
+        (artist_results if artist else keyword_results).append(items)
 
     tracks: list[Track] = []
     seen_titles: set[tuple[str, str]] = set()
-    for item in _interleave(results):
+    for item in _interleave(artist_results) + _interleave(keyword_results):
         track = to_track(item, reasons.get(item["id"], ""), "search")
         title_key = (normalize(track.title), normalize(track.artist))
         if track.spotify_id in exclude or title_key in seen_titles:

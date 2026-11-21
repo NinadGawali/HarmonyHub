@@ -14,10 +14,10 @@ class RecommendRequest(BaseModel):
     # ISO 3166-1 alpha-2 country code, used to pick tracks playable in the user's country.
     market: Optional[str] = None
 
-    @field_validator("prompt", "artist")
+    @field_validator("prompt", "artist", mode="before")
     @classmethod
-    def _strip(cls, value: str) -> str:
-        return " ".join(value.split())
+    def _strip(cls, value) -> str:
+        return " ".join((value or "").split()) if isinstance(value, str) or value is None else value
 
     @field_validator("prompt")
     @classmethod

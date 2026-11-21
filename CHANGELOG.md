@@ -3,6 +3,19 @@
 Each phase of the [refinement plan](docs/REFINEMENT_PLAN.md) ships as a tagged, runnable version.
 Check out any version with `git checkout v<version>`.
 
+## [0.6.1] - 2026-11-21 — Recommender quality
+
+### Fixed
+- When some AI picks could not be found on Spotify, the playlist was topped up with a keyword search that
+  often added unrelated songs (e.g. "chill lofi" pulling in Haryanvi pop). The top-up now uses more songs by
+  the artists the AI already picked, and keyword search only fills what is still missing.
+- Spotify's `artist:` search is fuzzy ("WYS" also finds "WUYS"), so artist searches now keep only exact
+  artist-name matches.
+- `artist: null` in a recommend request returned 422; it is now treated as no artist.
+
+### Changed
+- Gemini is asked for 5 extra suggestions instead of 3, so more songs survive Spotify matching.
+
 ## [0.6.0] - 2026-10-30 — Phase 6: AI recommender rewrite
 
 Phase 6 shipped before phase 5 (rooms on Postgres), which is still in progress on `phase-5/rooms-postgres`.

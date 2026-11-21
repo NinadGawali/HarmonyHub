@@ -19,7 +19,7 @@ from .schemas import LlmPlaylist, RecommendRequest
 log = logging.getLogger(__name__)
 
 # Ask for a few extra songs, because some suggestions will not be found on Spotify.
-EXTRA_SUGGESTIONS = 3
+EXTRA_SUGGESTIONS = 5
 
 MODELS_CACHE_KEY = "llm:models"
 MODELS_CACHE_TTL = 6 * 60 * 60

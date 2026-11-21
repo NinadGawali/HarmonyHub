@@ -36,6 +36,19 @@ def cache_key(request: RecommendRequest) -> str:
     return "result:" + hashlib.sha256(json.dumps(normalized, sort_keys=True).encode()).hexdigest()
 
 
+MAX_SEED_ARTISTS = 3
+
+
+def seed_artists(tracks: list[Track]) -> list[str]:
+    """Main artist of each AI-matched track, deduplicated, for topping up the playlist."""
+    artists: list[str] = []
+    for track in tracks:
+        main = track.artist.split(",")[0].strip()
+        if main and normalize(main) not in {normalize(a) for a in artists}:
+            artists.append(main)
+    return artists[:MAX_SEED_ARTISTS]
+
+
 class Recommender:
     def __init__(self, settings: Settings, cache: Cache, llm: GeminiRecommender, spotify: SpotifyClient):
         self._settings = settings
@@ -115,7 +128,11 @@ class Recommender:
 
         if len(tracks) < request.count:
             extra = await search_tracks(
-                self._spotify, request, request.count - len(tracks), exclude={t.spotify_id for t in tracks}
+                self._spotify,
+                request,
+                request.count - len(tracks),
+                exclude={t.spotify_id for t in tracks},
+                seed_artists=seed_artists(tracks),
             )
             tracks += extra
 
