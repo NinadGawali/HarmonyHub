@@ -130,3 +130,38 @@ async def test_no_songs_at_all_raises(cache, spotify_api):
     with pytest.raises(SpotifyUnavailable):
         await recommender.recommend(RecommendRequest(prompt="anything", count=4))
     await spotify.close()
+
+
+async def test_top_up_prefers_artists_the_ai_picked(cache, spotify_api):
+    queries = []
+
+    def reply(request):
+        query = request.url.params["q"]
+        queries.append(query)
+        if "Snowman" in query:
+            return search_reply(item("sn", "Snowman", "WYS"))
+        if query == 'artist:"WYS"':
+            return search_reply(item("sn", "Snowman", "WYS"), item("w1", "Ocean", "WYS"), item("x1", "Montagem", "WUYS"), item("w2", "Nights", "WYS"))
+        if "Invented" in query:
+            return search_reply()
+        return search_reply(item("k1", "Chill", "Unrelated Pop"))
+
+    spotify_api.get(SEARCH_URL).mock(side_effect=reply)
+    playlist = LlmPlaylist(assistant_message="Study.", songs=[
+        LlmSong(title="Snowman", artist="WYS", reason="Lofi."),
+        LlmSong(title="Invented", artist="Nobody", reason="Fake."),
+    ])
+    spotify = SpotifyClient(make_settings(), cache)
+    recommender = Recommender(make_settings(), cache, FakeLlm(playlist), spotify)
+
+    result = await recommender.recommend(RecommendRequest(prompt="chill lofi", count=4))
+    ids = [t.spotify_id for t in result.tracks]
+    assert ids[:2] == ["sn", "w1"]
+    assert "w2" in ids
+    assert "x1" not in ids  # fuzzy artist match is dropped
+    assert 'artist:"WYS"' in queries
+    await spotify.close()
+
+
+def test_null_artist_is_accepted():
+    assert RecommendRequest(prompt="lofi", artist=None).artist == ""
