@@ -13,6 +13,47 @@ Internet ──80/443──► caddy ──► frontend (nginx: SPA + /api, /soc
   from the internet.
 - Database migrations run automatically when the backend starts.
 
+## Automated: one command with Terraform (recommended)
+
+`infra/aws-up.sh` does everything: it creates the AWS resources with Terraform (a VPC, a security group,
+an SSH key, a t3.small Ubuntu 24.04 server, and an Elastic IP), builds a production `.env` from your local
+`.env` files, uploads the code, starts the app, and checks that `https://<ip>` works.
+`infra/aws-down.sh` deletes all of it again.
+
+### Prerequisites
+
+- **Tools:** [Terraform](https://developer.hashicorp.com/terraform/install) 1.6+, the
+  [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html), git, and a bash
+  shell with ssh, curl and openssl. On Windows, use **Git Bash**.
+- **AWS credentials:** run `aws configure` with an IAM user that can manage EC2 and VPC resources.
+- **Local env:** a filled-in `.env` (copy `.env.example`). It needs at least `SPOTIFY_CLIENT_ID` and
+  `SPOTIFY_CLIENT_SECRET`; `GOOGLE_API_KEY` is optional. Values in `backend/.env` override `.env`.
+  Laptop-only values (localhost URLs and ports) are replaced automatically. A database password and any
+  missing app secrets are generated once and kept in `infra/.secrets/` (git-ignored).
+
+### Deploy, redeploy, destroy
+
+```bash
+./infra/aws-up.sh            # create everything and deploy (about 15 minutes the first time)
+./infra/aws-up.sh            # run again after new commits: redeploys the latest commit and keeps the data
+./infra/aws-down.sh          # delete the server, its data, the IP and the network (asks for confirmation)
+```
+
+When `aws-up.sh` finishes, it prints the app URL and the **Spotify redirect URI**. Add that URI in the
+Spotify dashboard (section 2 below); that's the only manual step.
+
+- **Region / size:** `TF_VAR_region=us-east-1 TF_VAR_instance_type=t3.medium ./infra/aws-up.sh`
+  (defaults: `ap-south-1` Mumbai, `t3.small`).
+- **Only committed code is deployed** (`git archive HEAD`), so the server never needs GitHub access.
+- **SSH:** `ssh -i infra/.secrets/harmonyhub-ssh.pem ubuntu@<ip>`. Port 22 only accepts your IP from the
+  last `aws-up.sh` run; if your IP changes, rerun `aws-up.sh`.
+- **State:** Terraform state lives in `infra/terraform/terraform.tfstate` on the computer that ran
+  `aws-up.sh`. Destroy from the same computer, and don't delete that file while the server exists.
+- **Cost:** a t3.small with a 20 GB disk and a public IPv4 address costs about **$20/month** in ap-south-1
+  while it exists. `aws-down.sh` stops all charges.
+
+The manual steps below do the same thing by hand.
+
 ## 1. AWS setup (once)
 
 1. **Launch an instance:** Ubuntu Server 24.04 LTS, **t3.small** (2 GB), 20 GB gp3 disk, and a key pair you can SSH with.
