@@ -298,7 +298,7 @@ Also: `song_request_processed` is currently broadcast to the **whole room**, so 
 | 4 | v0.4.0 | Frontend redesign (design system, CSS modules, shared playback, new pages) and removal of location-based playlists | Done |
 | 5 | v0.5.0 | Rooms, votes and requests on Postgres + Redis, guest-to-Spotify vote merge, socket contract v2 | Next |
 | 6 | v0.6.0 | Python recommender rewrite (FastAPI, structured output, Spotify matching, Redis cache) + Node thin proxy | Done (shipped before 5) |
-| 7 | v0.7.0 | Playlists in the database, export to Spotify | |
+| 7 | v0.7.0 | Playlists in the database, export to Spotify | Export + AI room fill done; DB playlists pending |
 | 8 | v0.8.0 | Tests, CI, docs refresh | |
 | 9 | later | Terraform provisioning and hosted deployment | Deferred |
 

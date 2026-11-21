@@ -1,9 +1,13 @@
 const votingService = require('../services/votingService');
 const { authenticateSocket } = require('./socketAuth');
 const { allowRequest } = require('../utils/rateLimit');
+const { config } = require('../config/env');
+const { RecommenderUnavailableError, generatePlaylist } = require('../services/playlistRecommendationService');
 
 const MAX_REQUEST_QUERY_LENGTH = 200;
 const SONG_REQUESTS_PER_MINUTE = 5;
+const MAX_AI_PROMPT_LENGTH = 300;
+const DEFAULT_AI_FILL_COUNT = 10;
 
 // Per-user channel, so request outcomes reach only the requester (on every device).
 const userChannel = (userId) => `user:${userId}`;
@@ -123,6 +127,41 @@ module.exports = (io) => {
       await votingService.addSongToRoom(roomId, songData);
       await broadcastLeaderboard(roomId);
     }, 'Failed to add song');
+
+    // The host describes a vibe; the recommender's songs are added to the room for guests to vote on.
+    on('ai_fill_queue', async ({ roomId, prompt, count }) => {
+      await assertHost(roomId);
+      const text = typeof prompt === 'string' ? prompt.trim() : '';
+      assertValue(text, 'Describe the songs you want');
+      assertValue(text.length <= MAX_AI_PROMPT_LENGTH, `Keep it under ${MAX_AI_PROMPT_LENGTH} characters`);
+      // Shares the per-user AI budget with playlist generation.
+      assertValue(
+        await allowRequest(`playlist-generate:${user.id}`, config.recommender.generationsPerMinute, 60),
+        'You are asking the AI very quickly. Wait a minute and try again.'
+      );
+
+      let playlist;
+      try {
+        playlist = await generatePlaylist({ prompt: text, count: count || DEFAULT_AI_FILL_COUNT, market: user.country });
+      } catch (error) {
+        if (error instanceof RecommenderUnavailableError) throw new ClientError(error.message);
+        throw error;
+      }
+
+      const inRoom = new Set((await votingService.getLeaderboard(roomId)).map((song) => song.songId));
+      const fresh = playlist.songs.filter((song) => !inRoom.has(song.songId));
+      for (const song of fresh) {
+        await votingService.addSongToRoom(roomId, song);
+      }
+      if (fresh.length) await broadcastLeaderboard(roomId);
+
+      socket.emit('ai_fill_done', {
+        added: fresh.length,
+        skipped: playlist.songs.length - fresh.length,
+        message: playlist.message,
+        usedFallback: playlist.usedFallback
+      });
+    }, 'The AI could not add songs right now');
 
     on('remove_song', async ({ roomId, songId }) => {
       await assertHost(roomId);
